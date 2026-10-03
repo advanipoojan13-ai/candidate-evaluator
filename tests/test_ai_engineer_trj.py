@@ -178,7 +178,40 @@ def test_ai_engineer_project_only_profile_is_scorable() -> None:
         0,
     )
     role = get_role_profile("ai_engineer_trj")
-    assert candidate_input_issue(candidate, role.key, role.evidence_sources, role.require_experience) == ""
+    assert candidate_input_issue(
+        candidate,
+        role.key,
+        role.evidence_sources,
+        role.require_experience,
+        role.skip_if_no_evidence,
+    ) == ""
+
+
+def test_ai_engineer_sparse_profile_is_scored_instead_of_excluded() -> None:
+    candidate = normalize_candidate(
+        {
+            "publicIdentifier": "sparse-person",
+            "linkedinUrl": "https://www.linkedin.com/in/sparse-person/",
+            "fullName": "Sparse Person",
+            "education": [{"schoolName": "Example University"}],
+        },
+        0,
+    )
+    role = get_role_profile("ai_engineer_trj")
+
+    assert role.skip_if_no_evidence is False
+    assert candidate_input_issue(
+        candidate,
+        role.key,
+        role.evidence_sources,
+        role.require_experience,
+        role.skip_if_no_evidence,
+    ) == ""
+    assert _candidate_payload(candidate, role) == {
+        "LinkedIn Profile ID": "sparse-person",
+        "LinkedIn URL": "https://www.linkedin.com/in/sparse-person/",
+        "Candidate Name": "Sparse Person",
+    }
 
 
 def test_ai_engineer_schema_and_bundled_rubric_exclude_rank_from_model_response() -> None:

@@ -400,6 +400,7 @@ def _candidate_input_issue_for_role(candidate: dict[str, Any], role: RoleProfile
         role.key,
         evidence_sources=role.evidence_sources,
         require_experience=role.require_experience,
+        skip_if_no_evidence=role.skip_if_no_evidence,
     )
 
 
@@ -409,6 +410,7 @@ def _candidate_input_issues_for_role(candidates: list[dict[str, Any]], role: Rol
         role.key,
         evidence_sources=role.evidence_sources,
         require_experience=role.require_experience,
+        skip_if_no_evidence=role.skip_if_no_evidence,
     )
 
 
@@ -533,7 +535,8 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
     skipped_in_pass = 0
     for candidate in candidates:
         candidate_id = candidate["linkedin_profile_id"]
-        state = status_by_id.get(candidate_id, {}).get("state", "pending")
+        status_entry = status_by_id.get(candidate_id, {})
+        state = status_entry.get("state", "pending")
         input_issue = _candidate_input_issue_for_role(candidate, role)
         if input_issue and state != "completed" and candidate_id not in completed_row_ids:
             mark_skipped(run_id, candidate_id, f"Skipped before API call: {input_issue}.")
@@ -541,7 +544,15 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
             continue
         if retry_failed and state == "failed":
             worklist.append(candidate)
-        elif not retry_failed and state not in {"completed", "skipped"} and candidate_id not in completed_row_ids:
+        elif (
+            not retry_failed
+            and state != "completed"
+            and candidate_id not in completed_row_ids
+            and (
+                state != "skipped"
+                or str(status_entry.get("error", "")).startswith("Skipped before API call:")
+            )
+        ):
             worklist.append(candidate)
 
     rubric_text = (run_dir(run_id) / "rubric.md").read_text(encoding="utf-8")

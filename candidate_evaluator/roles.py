@@ -38,6 +38,7 @@ class RoleProfile:
     rationale_min_words: int = 0
     evidence_sources: Optional[list[str]] = None
     require_experience: bool = False
+    skip_if_no_evidence: bool = True
 
     @property
     def output_columns(self) -> list[str]:
@@ -415,6 +416,7 @@ ROLE_PROFILES = {
         ],
         rationale_min_words=50,
         evidence_sources=["Location", "Headline", "About", "All experiences", "Projects"],
+        skip_if_no_evidence=False,
     ),
 }
 

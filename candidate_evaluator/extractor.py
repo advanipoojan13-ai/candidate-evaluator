@@ -113,6 +113,7 @@ def candidate_input_issue(
     role_key: str = "",
     evidence_sources: Optional[list[str]] = None,
     require_experience: bool = False,
+    skip_if_no_evidence: bool = True,
 ) -> str:
     """Return why one record should be skipped before making an API call."""
     reasons = []
@@ -124,10 +125,11 @@ def candidate_input_issue(
     elif any(marker in linkedin_url for marker in ("linkedin.com/posts/", "linkedin.com/feed/update/")):
         reasons.append("URL is a LinkedIn post/activity rather than a candidate profile")
     if evidence_sources is not None:
-        if require_experience and not candidate.get("experiences"):
-            reasons.append("no experience entries are available for this custom role")
-        if not has_selected_evidence(candidate, evidence_sources):
-            reasons.append("none of the selected evidence sources contain usable data")
+        if skip_if_no_evidence:
+            if require_experience and not candidate.get("experiences"):
+                reasons.append("no experience entries are available for this custom role")
+            if not has_selected_evidence(candidate, evidence_sources):
+                reasons.append("none of the selected evidence sources contain usable data")
     elif role_key == "qa":
         if not candidate.get("experiences"):
             reasons.append("no experience entries are available for QA scoring")
@@ -141,6 +143,7 @@ def candidate_input_issues(
     role_key: str = "",
     evidence_sources: Optional[list[str]] = None,
     require_experience: bool = False,
+    skip_if_no_evidence: bool = True,
 ) -> list[str]:
     """Summarize records that will be skipped without blocking valid records."""
     post_records = []
@@ -153,10 +156,12 @@ def candidate_input_issues(
             post_records.append(candidate_id)
         if not candidate.get("candidate_name") or not linkedin_url:
             missing_identity_records.append(candidate_id)
-        if evidence_sources is not None:
+        if evidence_sources is not None and skip_if_no_evidence:
             lacks_evidence = not has_selected_evidence(candidate, evidence_sources) or (
                 require_experience and not candidate.get("experiences")
             )
+        elif evidence_sources is not None:
+            lacks_evidence = False
         else:
             lacks_evidence = not candidate.get("experiences") if role_key == "qa" else not any(
                 (candidate.get("headline"), candidate.get("about"), candidate.get("experiences"))

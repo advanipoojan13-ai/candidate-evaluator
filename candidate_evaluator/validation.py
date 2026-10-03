@@ -68,8 +68,8 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
     rationale_words = _word_count(rationale)
     if role.rationale_min_words and rationale_words < role.rationale_min_words:
         errors.append(f"Score Rationale must be at least {role.rationale_min_words} words; got {rationale_words}.")
-    if rationale_words > 75:
-        errors.append(f"Score Rationale must be no longer than 75 words; got {rationale_words}.")
+    if role.rationale_max_words and rationale_words > role.rationale_max_words:
+        errors.append(f"Score Rationale must be no longer than {role.rationale_max_words} words; got {rationale_words}.")
 
     return errors
 

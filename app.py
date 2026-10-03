@@ -329,8 +329,12 @@ def _parse_custom_models(raw_models: str) -> list[str]:
 
 
 def _default_rubric_path(role_key: str) -> str:
-    if role_key == "backend":
-        bundled = Path(__file__).parent / "rubrics" / "backend_engineer.md"
+    bundled_rubrics = {
+        "backend": "backend_engineer.md",
+        "ai_engineer_trj": "ai_engineer_trj.md",
+    }
+    if role_key in bundled_rubrics:
+        bundled = Path(__file__).parent / "rubrics" / bundled_rubrics[role_key]
         return str(bundled) if bundled.exists() else ""
     return DEFAULT_RUBRIC_PATH if role_key == "design" and Path(DEFAULT_RUBRIC_PATH).exists() else ""
 

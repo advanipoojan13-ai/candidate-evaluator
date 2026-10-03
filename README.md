@@ -20,9 +20,10 @@ Use **Evaluation role** to choose the scoring mode:
 - **Design / Product UX** keeps the original 60-point design evaluator.
 - **QA Automation Engineer** uses the 100-point QA automation rubric and QA-specific output columns.
 - **Backend Engineer** uses the bundled 60-point PHP, Python, Laravel, and AWS rubric, including decimal scores, evidence warnings, and deterministic rank numbers.
+- **AI Engineer TRJ** uses the bundled 100-point AI and automation rubric, including capability-specific evidence, recency and duration scoring, evidence warnings, and deterministic rank numbers.
 - **Custom Role** creates a validated scoring contract from a role name, scoring categories, category maxima, optional discrete scores, outcome bands, and permitted LinkedIn evidence sources.
 
-Backend Engineer automatically loads `rubrics/backend_engineer.md`. You may still upload a replacement rubric, but it must preserve the Backend role's scoring categories and output contract.
+Backend Engineer automatically loads `rubrics/backend_engineer.md`, and AI Engineer TRJ automatically loads `rubrics/ai_engineer_trj.md`. You may still upload a replacement rubric, but it must preserve the selected role's scoring categories and output contract.
 
 Each saved run stores its role. Custom runs also store the complete custom configuration, so resume/retry/export use the same schema that the run started with.
 
@@ -38,7 +39,7 @@ Select **Custom Role**, upload the role's rubric, and complete the setup table. 
 
 The app builds the OpenAI JSON schema and export columns from that configuration. It validates every response again before saving it: category values, allowed discrete scores, total-score arithmetic, outcome band, required columns, evidence count, and rationale length. Profiles missing identity or all selected evidence are skipped individually without stopping the run or making an OpenAI call.
 
-Custom roles can independently permit location, headline, About, experiences 0-4, all experiences, current company, role titles, durations, global skills, experience-level skills, education, website, open-to-work, hiring, and services signals. Only the selected evidence is included in the OpenAI candidate payload.
+Custom roles can independently permit location, headline, About, projects, experiences 0-4, all experiences, current company, role titles, durations, global skills, experience-level skills, education, website, open-to-work, hiring, and services signals. Only the selected evidence is included in the OpenAI candidate payload.
 
 ## Safety
 

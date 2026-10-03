@@ -104,8 +104,9 @@ def _retry_after_seconds(exc: Exception) -> Optional[float]:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key == "backend":
+    if role.key in {"backend", "ai_engineer_trj"}:
         experiences = merge_duplicate_experiences(experiences)
+    candidate = {**candidate, "experiences": experiences}
     payload = {
         "LinkedIn Profile ID": candidate.get("linkedin_profile_id", ""),
         "LinkedIn URL": candidate.get("linkedin_url", ""),

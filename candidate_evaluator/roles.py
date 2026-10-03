@@ -186,6 +186,56 @@ BACKEND_WARNING_ENUMS = {
 }
 
 
+AI_ENGINEER_TRJ_GRADING_COLUMNS = [
+    "Current Company",
+    "Current Title",
+    "AI / LLM / Agentic Systems Score (/30)",
+    "Python Score (/25)",
+    "API & System Integration Score (/20)",
+    "Workflow Automation Score (/15)",
+    "TypeScript / Node.js Score (/5)",
+    "Ownership / Production Maturity Score (/5)",
+    "Final Score (/100)",
+    "AI / LLM / Agentic Systems Unverified",
+    "Python Unverified",
+    "API & System Integration Unverified",
+    "Seniority Unverified",
+    "Date-Quality Warning",
+    "Evidence Confidence",
+    "Strongest Evidence 1",
+    "Strongest Evidence 2",
+    "Strongest Evidence 3",
+    "Missing or Unclear Information",
+    "Score Rationale",
+]
+
+AI_ENGINEER_TRJ_OUTPUT_COLUMNS = [
+    "Rank Number",
+    "Candidate",
+    "Profile URL",
+    *AI_ENGINEER_TRJ_GRADING_COLUMNS,
+]
+
+AI_ENGINEER_TRJ_CATEGORY_SCORES = OrderedDict(
+    [
+        ("AI / LLM / Agentic Systems Score (/30)", 30),
+        ("Python Score (/25)", 25),
+        ("API & System Integration Score (/20)", 20),
+        ("Workflow Automation Score (/15)", 15),
+        ("TypeScript / Node.js Score (/5)", 5),
+        ("Ownership / Production Maturity Score (/5)", 5),
+    ]
+)
+
+AI_ENGINEER_TRJ_WARNING_ENUMS = {
+    "AI / LLM / Agentic Systems Unverified": ["Yes", "No"],
+    "Python Unverified": ["Yes", "No"],
+    "API & System Integration Unverified": ["Yes", "No"],
+    "Seniority Unverified": ["Yes", "No"],
+    "Date-Quality Warning": ["Yes", "No"],
+}
+
+
 ROLE_PROFILES = {
     "design": RoleProfile(
         key="design",
@@ -310,6 +360,61 @@ ROLE_PROFILES = {
         ],
         strongest_evidence_columns=["Strongest Evidence"],
         rationale_min_words=50,
+    ),
+    "ai_engineer_trj": RoleProfile(
+        key="ai_engineer_trj",
+        label="AI Engineer TRJ",
+        role_name="Senior AI & Automation Engineer",
+        grading_columns=AI_ENGINEER_TRJ_GRADING_COLUMNS,
+        category_scores=AI_ENGINEER_TRJ_CATEGORY_SCORES,
+        allowed_scores={},
+        total_column="Final Score (/100)",
+        total_max=100,
+        outcome_column="Rank Number",
+        outcome_bands=[],
+        evidence_confidence_values=["High", "Medium", "Low"],
+        system_prompt=(
+            "You are a strict LinkedIn evidence evaluator for Senior AI & Automation Engineer profiles. "
+            "Score AI/LLM/agentic systems, Python, API/system integration, workflow automation, TypeScript/Node.js, "
+            "and ownership/production maturity independently using only the supplied rubric and permitted candidate fields. "
+            "For each capability, calculate raw Evidence, Recency, and Evidenced Duration components, then apply the rubric multiplier. "
+            "Use the strongest evidence source without stacking evidence points, use only non-overlapping supported duration, and do not infer "
+            "one capability from another. Scores and Final Score may contain one decimal place. Final Score must equal the six capability scores "
+            "and must not exceed 100. Warnings do not change the score. Describe missing evidence neutrally as unverified. "
+            "Score Rationale must contain 50 to 75 words."
+        ),
+        instructions=[
+            "Use only Headline, About, experience title, experience description, experience-level skills or technologies, experience dates or duration, and Projects for scoring.",
+            "Use name, profile URL, current company or title, location, and employment type only for identification; they earn no points.",
+            "Do not score global skills, top skills, education, certifications, courses, recommendations, endorsements, followers, connections, languages, volunteering, company reputation, industry, recruiter-search match, LinkedIn-inferred skills, or outside knowledge.",
+            "Treat duplicate experience records as one record for evidence and duration; otherwise evaluate every experience entry.",
+            "Headline, About, and Projects receive zero Recency and zero Duration points.",
+            "Using ChatGPT, Copilot, or Claude as a productivity tool is not AI/LLM capability evidence. POCs and prototypes do not by themselves prove production maturity.",
+            "Workflow Automation means identifiable business or operational workflows. Do not count QA/test automation, CI/CD, infrastructure automation, browser testing, or industrial/manufacturing automation.",
+            "Plain JavaScript and frontend-only work do not by themselves qualify for TypeScript / Node.js scoring.",
+            "Return only fields required by the JSON schema. Rank Number is calculated after all candidates are scored and must not be returned.",
+        ],
+        internal_role_flag_name="relevant_ai_automation_role",
+        internal_role_evidence_name="ai_automation_evidence_extracted",
+        export_columns=AI_ENGINEER_TRJ_OUTPUT_COLUMNS,
+        numeric_scores=True,
+        ranked=True,
+        column_enums=AI_ENGINEER_TRJ_WARNING_ENUMS,
+        ranking_tiebreaker_columns=[
+            "AI / LLM / Agentic Systems Score (/30)",
+            "Python Score (/25)",
+            "API & System Integration Score (/20)",
+            "Workflow Automation Score (/15)",
+            "Ownership / Production Maturity Score (/5)",
+            "TypeScript / Node.js Score (/5)",
+        ],
+        strongest_evidence_columns=[
+            "Strongest Evidence 1",
+            "Strongest Evidence 2",
+            "Strongest Evidence 3",
+        ],
+        rationale_min_words=50,
+        evidence_sources=["Location", "Headline", "About", "All experiences", "Projects"],
     ),
 }
 

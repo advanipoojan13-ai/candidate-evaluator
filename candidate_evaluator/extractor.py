@@ -62,6 +62,7 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
         "skills": _normalize_skills(profile.get("skills"), profile.get("topSkills")),
         "website": _first_website(profile.get("websites")),
         "education": education,
+        "projects": _normalize_projects(profile.get("projects")),
         "experiences": experiences,
         "open_to_work": profile.get("openToWork"),
         "open_to_work_present": "openToWork" in profile,
@@ -219,6 +220,51 @@ def _normalize_experience(exp: dict[str, Any], index: int) -> dict[str, Any]:
         # Kept internal for rubrics that explicitly allow role-attached skills.
         "experience_skills": _string_list(exp.get("skills")),
     }
+
+
+def _normalize_projects(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    projects: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, str):
+            description = _clean(item)
+            if description:
+                projects.append({"name": "", "description": description, "technologies": []})
+            continue
+        if not isinstance(item, dict):
+            continue
+        project = {
+            "name": _clean(_first_nonempty(item.get("name"), item.get("title"), item.get("projectName"))),
+            "description": _clean(_first_nonempty(item.get("description"), item.get("summary"))),
+            "technologies": _normalize_project_technologies(item),
+        }
+        if any(_has_normalized_value(field) for field in project.values()):
+            projects.append(project)
+    return projects
+
+
+def _has_normalized_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return bool(value)
+
+
+def _normalize_project_technologies(project: dict[str, Any]) -> list[str]:
+    for key in ("technologies", "skills", "techStack"):
+        value = project.get(key)
+        if not value:
+            continue
+        if isinstance(value, list):
+            normalized = []
+            for item in value:
+                name = _clean(item.get("name")) if isinstance(item, dict) else _clean(item)
+                if name and name not in normalized:
+                    normalized.append(name)
+            return normalized
+        if isinstance(value, str):
+            return [_clean(value)]
+    return []
 
 
 def _format_experience_for_cell(exp: dict[str, Any]) -> str:

@@ -25,11 +25,18 @@ def run_dir(run_id: str) -> Path:
     return Path(RUNS_DIR) / run_id
 
 
-def init_run(run_id: str, candidates: list[dict[str, Any]], rubric_text: str, model: str, role_key: str = DEFAULT_ROLE_KEY) -> Path:
+def init_run(
+    run_id: str,
+    candidates: list[dict[str, Any]],
+    rubric_text: str,
+    model: str,
+    role_key: str = DEFAULT_ROLE_KEY,
+    custom_role_config: Optional[dict[str, Any]] = None,
+) -> Path:
     path = run_dir(run_id)
     path.mkdir(parents=True, exist_ok=True)
     _write_json(path / "candidates.json", candidates)
-    _write_json(path / "status.json", _initial_status(candidates, model, role_key))
+    _write_json(path / "status.json", _initial_status(candidates, model, role_key, custom_role_config))
     (path / "rubric.md").write_text(rubric_text, encoding="utf-8")
     for name in ("rows.jsonl", "failed.jsonl", "skipped.jsonl", "raw_responses.jsonl"):
         (path / name).touch(exist_ok=True)
@@ -50,7 +57,14 @@ def run_select_options() -> dict[str, str]:
         if status.get("_load_error"):
             options[f"{run_id} — progress file temporarily unreadable"] = run_id
             continue
-        role = get_role_profile(status.get("role", DEFAULT_ROLE_KEY))
+        try:
+            role = get_role_profile(
+                status.get("role", DEFAULT_ROLE_KEY),
+                status.get("custom_role_config"),
+            )
+        except ValueError:
+            options[f"{run_id} — invalid saved role configuration"] = run_id
+            continue
         counts = _counts_from_status(status)
         label = (
             f"{run_id} — {role.label} — {counts['completed']} done / "
@@ -212,7 +226,7 @@ def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[d
     status = load_status(run_id)
     status_by_id = status.get("candidates", {})
     rows_by_id = result_rows_by_id(run_id)
-    ranked_rows = prepare_output_rows(list(rows_by_id.values()), role.key)
+    ranked_rows = prepare_output_rows(list(rows_by_id.values()), role)
     rank_by_url = {row.get("Profile URL"): row.get(role.outcome_column, "") for row in ranked_rows}
     rows = []
     for candidate in candidates:
@@ -240,7 +254,7 @@ def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[d
 
 def completed_preview_rows(run_id: str, role_key: Optional[str] = None) -> list[dict[str, Any]]:
     role = role_for_run(run_id, role_key)
-    rows = prepare_output_rows(result_rows(run_id), role.key) if role.ranked else result_rows(run_id)
+    rows = prepare_output_rows(result_rows(run_id), role) if role.ranked else result_rows(run_id)
     return [
         {
             "Candidate Name": row.get("Candidate Name") or row.get("Candidate", ""),
@@ -253,10 +267,9 @@ def completed_preview_rows(run_id: str, role_key: Optional[str] = None) -> list[
 
 
 def role_for_run(run_id: str, override_role_key: Optional[str] = None) -> RoleProfile:
-    if override_role_key:
-        return get_role_profile(override_role_key)
     status = load_status(run_id)
-    return get_role_profile(status.get("role", DEFAULT_ROLE_KEY))
+    role_key = override_role_key or status.get("role", DEFAULT_ROLE_KEY)
+    return get_role_profile(role_key, status.get("custom_role_config"))
 
 
 def progress_counts(run_id: str) -> dict[str, Any]:
@@ -295,7 +308,7 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     role = role_for_run(run_id, role_key)
     output_dir = Path(OUTPUTS_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
-    frame = pd.DataFrame(prepare_output_rows(rows, role.key), columns=role.output_columns)
+    frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.output_columns)
     csv_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.csv"
     xlsx_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
     frame.to_csv(csv_path, index=False)
@@ -303,10 +316,16 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     return csv_path, xlsx_path
 
 
-def _initial_status(candidates: list[dict[str, Any]], model: str, role_key: str) -> dict[str, Any]:
+def _initial_status(
+    candidates: list[dict[str, Any]],
+    model: str,
+    role_key: str,
+    custom_role_config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     return {
         "model": model,
         "role": role_key,
+        "custom_role_config": custom_role_config if role_key == "custom" else None,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "current_candidate": "",
         "candidates": {

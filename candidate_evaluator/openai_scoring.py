@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
 
+from .evidence import custom_evidence_payload
 from .extractor import merge_duplicate_experiences
 from .roles import RoleProfile, get_role_profile
 
@@ -19,10 +20,11 @@ def evaluate_candidate(
     rubric_text: str,
     candidate: dict[str, Any],
     role_key: str = "design",
+    role_profile: Optional[RoleProfile] = None,
     max_retries: int = 5,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     client = OpenAI(api_key=api_key)
-    role = get_role_profile(role_key)
+    role = role_profile or get_role_profile(role_key)
     response = _call_with_backoff(client, model, rubric_text, candidate, role, max_retries=max_retries)
     content = response.choices[0].message.content or "{}"
     raw = json.loads(content)
@@ -104,7 +106,7 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
     experiences = candidate.get("experiences") or []
     if role.key == "backend":
         experiences = merge_duplicate_experiences(experiences)
-    return {
+    payload = {
         "LinkedIn Profile ID": candidate.get("linkedin_profile_id", ""),
         "LinkedIn URL": candidate.get("linkedin_url", ""),
         "Candidate Name": candidate.get("candidate_name", ""),
@@ -114,6 +116,14 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
         "Education 0": (candidate.get("education") or [""])[0] if candidate.get("education") else "",
         "Education 1": (candidate.get("education") or ["", ""])[1] if len(candidate.get("education") or []) > 1 else "",
         "experiences": experiences,
+    }
+    if role.evidence_sources is None:
+        return payload
+    return {
+        "LinkedIn Profile ID": candidate.get("linkedin_profile_id", ""),
+        "LinkedIn URL": candidate.get("linkedin_url", ""),
+        "Candidate Name": candidate.get("candidate_name", ""),
+        **custom_evidence_payload(candidate, role.evidence_sources),
     }
 
 

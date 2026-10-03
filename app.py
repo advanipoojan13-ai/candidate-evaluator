@@ -40,7 +40,17 @@ from candidate_evaluator.progress import (
     save_exports,
     set_current,
 )
-from candidate_evaluator.roles import DEFAULT_ROLE_KEY, prepare_output_rows, role_options
+from candidate_evaluator.roles import (
+    CUSTOM_EVIDENCE_SOURCES,
+    CUSTOM_ROLE_KEY,
+    DEFAULT_CUSTOM_ROLE_CONFIG,
+    DEFAULT_ROLE_KEY,
+    RoleProfile,
+    get_role_profile,
+    prepare_output_rows,
+    role_options,
+    validate_custom_role_config,
+)
 from candidate_evaluator.validation import coerce_fixed_row, validate_output_row
 
 
@@ -76,9 +86,21 @@ def main() -> None:
         approved = st.checkbox("I approve paid OpenAI API calls for this run")
 
     candidates, rubric_text = _load_inputs(json_upload, sample_path, rubric_upload, rubric_path)
+    custom_role_config, custom_role_errors = _custom_role_editor(role_key)
+    role = None if custom_role_errors else get_role_profile(role_key, custom_role_config)
 
-    _show_preview(candidates, rubric_text, role_key)
-    _show_run_controls(candidates, rubric_text, role_key, model, int(parallel_calls), api_key, approved)
+    _show_preview(candidates, rubric_text, role)
+    _show_run_controls(
+        candidates,
+        rubric_text,
+        role_key,
+        custom_role_config,
+        custom_role_errors,
+        model,
+        int(parallel_calls),
+        api_key,
+        approved,
+    )
 
 
 def _require_access() -> None:
@@ -106,6 +128,166 @@ def _role_selector() -> str:
     options = role_options()
     selected_label = st.selectbox("Evaluation role", options=list(options), index=0)
     return options[selected_label]
+
+
+def _custom_role_editor(role_key: str) -> tuple[dict[str, Any] | None, list[str]]:
+    if role_key != CUSTOM_ROLE_KEY:
+        return None, []
+
+    st.subheader("Custom Role Setup")
+    role_name = st.text_input("Role name", value="", key="custom-role-name")
+    category_count = int(
+        st.number_input(
+            "Number of scoring categories",
+            min_value=1,
+            max_value=12,
+            value=len(DEFAULT_CUSTOM_ROLE_CONFIG["categories"]),
+            step=1,
+            key="custom-role-category-count",
+        )
+    )
+    st.markdown("**Scoring categories**")
+    categories = []
+    for index in range(category_count):
+        default = (
+            DEFAULT_CUSTOM_ROLE_CONFIG["categories"][index]
+            if index < len(DEFAULT_CUSTOM_ROLE_CONFIG["categories"])
+            else {"name": "", "max_score": 10, "allowed_scores": []}
+        )
+        name_col, max_col, allowed_col = st.columns([2, 1, 2])
+        with name_col:
+            name = st.text_input(
+                f"Category {index + 1}",
+                value=str(default["name"]),
+                key=f"custom-role-category-name-{index}",
+            )
+        with max_col:
+            maximum = int(
+                st.number_input(
+                    f"Maximum {index + 1}",
+                    min_value=1,
+                    max_value=100,
+                    value=int(default["max_score"]),
+                    step=1,
+                    key=f"custom-role-category-max-{index}",
+                )
+            )
+        with allowed_col:
+            allowed_raw = st.text_input(
+                f"Allowed scores {index + 1}",
+                value=", ".join(str(value) for value in default["allowed_scores"]),
+                help="Optional. Leave blank for any whole score from zero to the maximum, or enter values such as 0, 5, 10.",
+                key=f"custom-role-category-allowed-{index}",
+            )
+        categories.append(
+            {
+                "name": name.strip(),
+                "max_score": maximum,
+                "allowed_scores": _parse_allowed_scores(allowed_raw),
+            }
+        )
+
+    outcome_column = st.text_input(
+        "Outcome column name",
+        value=DEFAULT_CUSTOM_ROLE_CONFIG["outcome_column"],
+        key="custom-role-outcome-column",
+    )
+    band_count = int(
+        st.number_input(
+            "Number of outcome bands",
+            min_value=1,
+            max_value=10,
+            value=len(DEFAULT_CUSTOM_ROLE_CONFIG["outcome_bands"]),
+            step=1,
+            key="custom-role-band-count",
+        )
+    )
+    st.markdown("**Outcome bands**")
+    bands = []
+    for index in range(band_count):
+        default = (
+            DEFAULT_CUSTOM_ROLE_CONFIG["outcome_bands"][index]
+            if index < len(DEFAULT_CUSTOM_ROLE_CONFIG["outcome_bands"])
+            else {"minimum": 0, "maximum": 0, "label": ""}
+        )
+        low_col, high_col, label_col = st.columns([1, 1, 2])
+        with low_col:
+            low = int(
+                st.number_input(
+                    f"Minimum {index + 1}",
+                    min_value=0,
+                    max_value=500,
+                    value=int(default["minimum"]),
+                    step=1,
+                    key=f"custom-role-band-min-{index}",
+                )
+            )
+        with high_col:
+            high = int(
+                st.number_input(
+                    f"Maximum {index + 1}",
+                    min_value=0,
+                    max_value=500,
+                    value=int(default["maximum"]),
+                    step=1,
+                    key=f"custom-role-band-max-{index}",
+                )
+            )
+        with label_col:
+            label = st.text_input(
+                f"Outcome label {index + 1}",
+                value=str(default["label"]),
+                key=f"custom-role-band-label-{index}",
+            )
+        bands.append({"minimum": low, "maximum": high, "label": label.strip()})
+    evidence_sources = st.multiselect(
+        "Permitted LinkedIn evidence",
+        options=CUSTOM_EVIDENCE_SOURCES,
+        default=DEFAULT_CUSTOM_ROLE_CONFIG["evidence_sources"],
+        key="custom-role-evidence",
+    )
+    require_experience = st.checkbox(
+        "Require at least one experience entry",
+        value=DEFAULT_CUSTOM_ROLE_CONFIG["require_experience"],
+        key="custom-role-require-experience",
+    )
+
+    config = {
+        "role_name": role_name.strip(),
+        "categories": categories,
+        "outcome_column": outcome_column.strip(),
+        "outcome_bands": bands,
+        "evidence_sources": evidence_sources,
+        "require_experience": require_experience,
+    }
+    errors = validate_custom_role_config(config)
+    if errors:
+        st.error("Custom role setup needs attention:\n\n" + "\n".join(f"- {error}" for error in errors))
+    else:
+        role = get_role_profile(CUSTOM_ROLE_KEY, config)
+        st.success(
+            f"Configuration valid: {len(role.category_scores)} categories, "
+            f"{int(role.total_max)} total points, {len(role.outcome_bands)} outcome bands."
+        )
+        with st.expander("Review generated output columns"):
+            st.write(role.output_columns)
+    return config, errors
+
+
+def _parse_allowed_scores(value: Any) -> list[Any]:
+    if value is None or not str(value).strip():
+        return []
+    parsed: list[Any] = []
+    for item in str(value).replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            number = float(item)
+            parsed.append(int(number) if number.is_integer() else number)
+        except ValueError:
+            parsed.append(item)
+    return parsed
 
 
 def _model_selector() -> str:
@@ -185,13 +367,16 @@ def _candidates_from_json_path(path: str, _mtime_ns: int) -> list[dict[str, Any]
     return normalize_candidates(load_profiles(path))
 
 
-def _show_preview(candidates: list[dict[str, Any]], rubric_text: str, role_key: str) -> None:
+def _show_preview(candidates: list[dict[str, Any]], rubric_text: str, role: RoleProfile | None) -> None:
     st.subheader("Extraction Preview")
     st.write(f"Candidates loaded: {len(candidates)}")
     st.write(f"Rubric loaded: {'yes' if rubric_text else 'no'}")
-    issues = candidate_input_issues(candidates, role_key)
+    if role is None:
+        st.warning("Complete the custom role setup before starting an evaluation.")
+        return
+    issues = _candidate_input_issues_for_role(candidates, role)
     if issues:
-        skipped_count = sum(bool(candidate_input_issue(candidate, role_key)) for candidate in candidates)
+        skipped_count = sum(bool(_candidate_input_issue_for_role(candidate, role)) for candidate in candidates)
         st.warning(f"{skipped_count} of {len(candidates)} profile(s) will be skipped without an OpenAI call.")
         for issue in issues:
             st.write(f"- {issue}")
@@ -205,10 +390,46 @@ def _show_preview(candidates: list[dict[str, Any]], rubric_text: str, role_key: 
         _display_table(st.session_state["preview"])
 
 
+def _candidate_input_issue_for_role(candidate: dict[str, Any], role: RoleProfile) -> str:
+    return candidate_input_issue(
+        candidate,
+        role.key,
+        evidence_sources=role.evidence_sources,
+        require_experience=role.require_experience,
+    )
+
+
+def _candidate_input_issues_for_role(candidates: list[dict[str, Any]], role: RoleProfile) -> list[str]:
+    return candidate_input_issues(
+        candidates,
+        role.key,
+        evidence_sources=role.evidence_sources,
+        require_experience=role.require_experience,
+    )
+
+
+def _run_matches_role_config(
+    run_id: str,
+    role_key: str,
+    custom_role_config: dict[str, Any] | None,
+) -> bool:
+    try:
+        status = load_status(run_id)
+    except Exception:
+        return False
+    if status.get("role", DEFAULT_ROLE_KEY) != role_key:
+        return False
+    if role_key == CUSTOM_ROLE_KEY:
+        return status.get("custom_role_config") == custom_role_config
+    return True
+
+
 def _show_run_controls(
     candidates: list[dict[str, Any]],
     rubric_text: str,
     role_key: str,
+    custom_role_config: dict[str, Any] | None,
+    custom_role_errors: list[str],
     model: str,
     parallel_calls: int,
     api_key: str,
@@ -218,8 +439,12 @@ def _show_run_controls(
     existing_run_options = run_select_options()
     selected_run_label = st.selectbox("Resume run", options=[""] + list(existing_run_options), index=0)
     selected_run = existing_run_options.get(selected_run_label, "")
-    selected_run_role = role_for_run(selected_run).key if selected_run else role_key
-    selected_run_issues = candidate_input_issues(load_candidates(selected_run), selected_run_role) if selected_run else []
+    selected_run_role = role_for_run(selected_run) if selected_run else None
+    selected_run_issues = (
+        _candidate_input_issues_for_role(load_candidates(selected_run), selected_run_role)
+        if selected_run_role
+        else []
+    )
     if selected_run_issues:
         st.warning("This saved run contains profile records that will be skipped.")
         for issue in selected_run_issues:
@@ -229,7 +454,7 @@ def _show_run_controls(
     with col1:
         start_clicked = st.button(
             "Start / resume evaluation",
-            disabled=not candidates or not rubric_text,
+            disabled=not candidates or not rubric_text or (not selected_run and bool(custom_role_errors)),
         )
     with col2:
         retry_clicked = st.button(
@@ -239,13 +464,23 @@ def _show_run_controls(
     with col3:
         export_clicked = st.button("Save exports", disabled=not selected_run)
 
-    active_run = selected_run or st.session_state.get("active_run_id", "")
+    session_run = st.session_state.get("active_run_id", "")
+    if session_run and not _run_matches_role_config(session_run, role_key, custom_role_config):
+        session_run = ""
+    active_run = selected_run or session_run
     ran_evaluation = False
     if start_clicked:
         _require_api_ready(api_key, approved)
         if not active_run:
             active_run = make_run_id()
-            init_run(active_run, candidates, rubric_text, model, role_key)
+            init_run(
+                active_run,
+                candidates,
+                rubric_text,
+                model,
+                role_key,
+                custom_role_config=custom_role_config,
+            )
             st.session_state["active_run_id"] = active_run
         _run_evaluation(active_run, api_key, model, parallel_calls, retry_failed=False)
         ran_evaluation = True
@@ -281,7 +516,7 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
     candidates = load_candidates(run_id)
     reset_running(run_id)
     status = load_status(run_id)
-    role_key = status.get("role", DEFAULT_ROLE_KEY)
+    role = role_for_run(run_id)
     status_by_id = status.get("candidates", {})
     completed_row_ids = set(result_rows_by_id(run_id))
     progress = st.progress(0)
@@ -295,7 +530,7 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
     for candidate in candidates:
         candidate_id = candidate["linkedin_profile_id"]
         state = status_by_id.get(candidate_id, {}).get("state", "pending")
-        input_issue = candidate_input_issue(candidate, role_key)
+        input_issue = _candidate_input_issue_for_role(candidate, role)
         if input_issue and state != "completed" and candidate_id not in completed_row_ids:
             mark_skipped(run_id, candidate_id, f"Skipped before API call: {input_issue}.")
             skipped_in_pass += 1
@@ -320,7 +555,7 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while pending and len(active) < max_workers:
-            _submit_candidate(executor, active, pending, run_id, api_key, model, rubric_text, role_key)
+            _submit_candidate(executor, active, pending, run_id, api_key, model, rubric_text, role)
         _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
         while active:
@@ -345,7 +580,7 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
                 progress.progress(completed_in_pass / total)
 
                 if pending:
-                    _submit_candidate(executor, active, pending, run_id, api_key, model, rubric_text, role_key)
+                    _submit_candidate(executor, active, pending, run_id, api_key, model, rubric_text, role)
 
             _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
@@ -361,12 +596,12 @@ def _submit_candidate(
     api_key: str,
     model: str,
     rubric_text: str,
-    role_key: str,
+    role: RoleProfile,
 ) -> None:
     candidate = pending.pop(0)
     candidate_id = candidate["linkedin_profile_id"]
     set_current(run_id, candidate_id)
-    future = executor.submit(_evaluate_candidate_for_run, api_key, model, rubric_text, candidate, role_key)
+    future = executor.submit(_evaluate_candidate_for_run, api_key, model, rubric_text, candidate, role)
     active[future] = candidate
 
 
@@ -375,7 +610,7 @@ def _evaluate_candidate_for_run(
     model: str,
     rubric_text: str,
     candidate: dict[str, Any],
-    role_key: str,
+    role: RoleProfile,
 ) -> dict[str, Any]:
     import time
 
@@ -383,7 +618,13 @@ def _evaluate_candidate_for_run(
     try:
         from candidate_evaluator.openai_scoring import evaluate_candidate
 
-        grading, raw = evaluate_candidate(api_key=api_key, model=model, rubric_text=rubric_text, candidate=candidate, role_key=role_key)
+        grading, raw = evaluate_candidate(
+            api_key=api_key,
+            model=model,
+            rubric_text=rubric_text,
+            candidate=candidate,
+            role_profile=role,
+        )
         role_source = {
             **candidate["source_row"],
             "Candidate": candidate.get("candidate_name", ""),
@@ -391,8 +632,8 @@ def _evaluate_candidate_for_run(
             "Rank Number": "",
         }
         row = {**role_source, **grading}
-        row = coerce_fixed_row(row, role_key)
-        errors = validate_output_row(row, role_key)
+        row = coerce_fixed_row(row, role)
+        errors = validate_output_row(row, role)
         if errors:
             return {
                 "state": "skipped",
@@ -445,11 +686,11 @@ def _render_live_status(
         col6.metric("Avg sec / candidate", _format_seconds(counts["avg_seconds_per_candidate"]))
         col7.metric("Est. time remaining", _format_eta(counts, parallel_calls))
         st.write(f"Current candidate: {counts['current_candidate'] or 'None'}")
-        _display_table(candidate_status_rows(run_id, role.key))
+        _display_table(candidate_status_rows(run_id))
 
     with preview.container():
         st.subheader("Completed Results Preview")
-        rows = completed_preview_rows(run_id, role.key)
+        rows = completed_preview_rows(run_id)
         if rows:
             _display_table(rows)
         else:
@@ -505,7 +746,7 @@ def _show_downloads(run_id: str) -> None:
     counts = progress_counts(run_id)
     if counts.get("skipped"):
         st.caption(f"{counts['skipped']} skipped profile(s) are logged in Evaluation Status and excluded from downloads.")
-    fixed_rows = prepare_output_rows(rows, role.key)
+    fixed_rows = prepare_output_rows(rows, role)
     csv_data = _rows_to_csv_bytes(fixed_rows, role.output_columns)
     st.subheader("Downloads")
     csv_col, excel_col = st.columns(2)

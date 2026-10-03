@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from .constants import SOURCE_COLUMNS
+from .evidence import has_selected_evidence
 
 
 ALLOWED_EXPERIENCE_FIELDS = [
@@ -57,9 +58,17 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
         "candidate_name": _candidate_name(profile),
         "headline": _clean(profile.get("headline")),
         "about": _clean(profile.get("about")),
+        "location": _format_location(profile.get("location")),
+        "skills": _normalize_skills(profile.get("skills"), profile.get("topSkills")),
         "website": _first_website(profile.get("websites")),
         "education": education,
         "experiences": experiences,
+        "open_to_work": profile.get("openToWork"),
+        "open_to_work_present": "openToWork" in profile,
+        "hiring": profile.get("hiring"),
+        "hiring_present": "hiring" in profile,
+        "services": profile.get("services"),
+        "services_present": "services" in profile and profile.get("services") is not None,
     }
     candidate["source_row"] = build_source_row(candidate)
     return candidate
@@ -98,7 +107,12 @@ def preview_candidates(candidates: list[dict[str, Any]], limit: int = 5) -> list
     return preview
 
 
-def candidate_input_issue(candidate: dict[str, Any], role_key: str = "") -> str:
+def candidate_input_issue(
+    candidate: dict[str, Any],
+    role_key: str = "",
+    evidence_sources: Optional[list[str]] = None,
+    require_experience: bool = False,
+) -> str:
     """Return why one record should be skipped before making an API call."""
     reasons = []
     linkedin_url = str(candidate.get("linkedin_url") or "").casefold()
@@ -108,7 +122,12 @@ def candidate_input_issue(candidate: dict[str, Any], role_key: str = "") -> str:
         reasons.append("LinkedIn profile URL is empty")
     elif any(marker in linkedin_url for marker in ("linkedin.com/posts/", "linkedin.com/feed/update/")):
         reasons.append("URL is a LinkedIn post/activity rather than a candidate profile")
-    if role_key == "qa":
+    if evidence_sources is not None:
+        if require_experience and not candidate.get("experiences"):
+            reasons.append("no experience entries are available for this custom role")
+        if not has_selected_evidence(candidate, evidence_sources):
+            reasons.append("none of the selected evidence sources contain usable data")
+    elif role_key == "qa":
         if not candidate.get("experiences"):
             reasons.append("no experience entries are available for QA scoring")
     elif not any((candidate.get("headline"), candidate.get("about"), candidate.get("experiences"))):
@@ -116,7 +135,12 @@ def candidate_input_issue(candidate: dict[str, Any], role_key: str = "") -> str:
     return "; ".join(reasons)
 
 
-def candidate_input_issues(candidates: list[dict[str, Any]], role_key: str = "") -> list[str]:
+def candidate_input_issues(
+    candidates: list[dict[str, Any]],
+    role_key: str = "",
+    evidence_sources: Optional[list[str]] = None,
+    require_experience: bool = False,
+) -> list[str]:
     """Summarize records that will be skipped without blocking valid records."""
     post_records = []
     empty_evidence_records = []
@@ -128,9 +152,14 @@ def candidate_input_issues(candidates: list[dict[str, Any]], role_key: str = "")
             post_records.append(candidate_id)
         if not candidate.get("candidate_name") or not linkedin_url:
             missing_identity_records.append(candidate_id)
-        lacks_evidence = not candidate.get("experiences") if role_key == "qa" else not any(
-            (candidate.get("headline"), candidate.get("about"), candidate.get("experiences"))
-        )
+        if evidence_sources is not None:
+            lacks_evidence = not has_selected_evidence(candidate, evidence_sources) or (
+                require_experience and not candidate.get("experiences")
+            )
+        else:
+            lacks_evidence = not candidate.get("experiences") if role_key == "qa" else not any(
+                (candidate.get("headline"), candidate.get("about"), candidate.get("experiences"))
+            )
         if lacks_evidence:
             empty_evidence_records.append(candidate_id)
 
@@ -142,7 +171,10 @@ def candidate_input_issues(candidates: list[dict[str, Any]], role_key: str = "")
     if missing_identity_records:
         issues.append(f"{len(missing_identity_records)} record(s) have an empty candidate name or LinkedIn profile URL.")
     if empty_evidence_records:
-        evidence_label = "experience entries required for QA scoring" if role_key == "qa" else "headline, About text, or experience entries"
+        if evidence_sources is not None:
+            evidence_label = "usable data in the custom role's selected evidence sources"
+        else:
+            evidence_label = "experience entries required for QA scoring" if role_key == "qa" else "headline, About text, or experience entries"
         issues.append(
             f"{len(empty_evidence_records)} record(s) contain no {evidence_label} to score."
         )
@@ -204,6 +236,38 @@ def _format_experience_for_cell(exp: dict[str, Any]) -> str:
 def _format_education(edu: dict[str, Any]) -> str:
     parts = [edu.get("schoolName"), edu.get("degree"), edu.get("fieldOfStudy"), edu.get("period")]
     return " | ".join(_clean(part) for part in parts if _clean(part))
+
+
+def _format_location(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _clean(value)
+    parsed = value.get("parsed") if isinstance(value.get("parsed"), dict) else {}
+    return _first_nonempty(
+        value.get("linkedinText"),
+        value.get("text"),
+        parsed.get("text"),
+        ", ".join(
+            part
+            for part in (
+                _clean(parsed.get("city")),
+                _clean(parsed.get("state")),
+                _clean(parsed.get("countryFull") or parsed.get("country")),
+            )
+            if part
+        ),
+    )
+
+
+def _normalize_skills(skills: Any, top_skills: Any) -> list[str]:
+    names: list[str] = []
+    for value in (skills, top_skills):
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            name = _clean(item.get("name")) if isinstance(item, dict) else _clean(item)
+            if name and name not in names:
+                names.append(name)
+    return names
 
 
 def _format_date(value: Any) -> str:

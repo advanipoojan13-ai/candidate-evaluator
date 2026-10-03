@@ -13,8 +13,8 @@ def expected_outcome(total_score: float, role: RoleProfile) -> str:
     raise ValueError(f"Total Score {total_score} is outside the 0-{role.total_max} range.")
 
 
-def validate_output_row(row: dict[str, Any], role_key: str = "design") -> list[str]:
-    role = get_role_profile(role_key)
+def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "design") -> list[str]:
+    role = _resolve_role(role_or_key)
     errors: list[str] = []
     missing = [column for column in role.output_columns if column not in row]
     if missing:
@@ -74,8 +74,8 @@ def validate_output_row(row: dict[str, Any], role_key: str = "design") -> list[s
     return errors
 
 
-def coerce_fixed_row(row: dict[str, Any], role_key: str = "design") -> dict[str, Any]:
-    role = get_role_profile(role_key)
+def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "design") -> dict[str, Any]:
+    role = _resolve_role(role_or_key)
     columns = list(dict.fromkeys(role.output_columns + role.grading_columns))
     fixed = {column: row.get(column, "") for column in columns}
     numeric_columns = list(role.category_scores) + [role.total_column] + (role.ranking_tiebreaker_columns or [])
@@ -83,6 +83,10 @@ def coerce_fixed_row(row: dict[str, Any], role_key: str = "design") -> dict[str,
         if fixed[column] != "":
             fixed[column] = float(fixed[column]) if role.numeric_scores else int(fixed[column])
     return fixed
+
+
+def _resolve_role(role_or_key: str | RoleProfile) -> RoleProfile:
+    return role_or_key if isinstance(role_or_key, RoleProfile) else get_role_profile(role_or_key)
 
 
 def _as_int(value: Any, name: str, errors: list[str]) -> Optional[int]:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app import _default_rubric_path
+import pytest
+
+from app import _default_rubric_path, _evaluate_candidate_for_run
 from candidate_evaluator.extractor import candidate_input_issue, normalize_candidate
 from candidate_evaluator.openai_scoring import _candidate_payload, _response_schema
 from candidate_evaluator.roles import get_role_profile, prepare_output_rows, role_options
@@ -72,6 +74,69 @@ def test_ai_engineer_validation_accepts_decimals_and_enforces_contract() -> None
     errors = validate_output_row(row, "ai_engineer_trj")
     assert any("must equal category score sum" in error for error in errors)
     assert any("Date-Quality Warning must be one of" in error for error in errors)
+
+
+def test_ai_engineer_validation_does_not_reject_rationale_word_count() -> None:
+    row = _valid_ai_row()
+    row["Score Rationale"] = "Brief rationale."
+    assert validate_output_row(row, "ai_engineer_trj") == []
+
+    row["Score Rationale"] = "word " * 100
+    assert validate_output_row(row, "ai_engineer_trj") == []
+
+
+@pytest.mark.parametrize("rationale", ["Brief rationale.", "word " * 100])
+def test_ai_engineer_full_evaluation_flow_accepts_any_rationale_length(monkeypatch, rationale: str) -> None:
+    grading = _valid_ai_row()
+    grading["Score Rationale"] = rationale
+
+    def fake_evaluate_candidate(**_kwargs):
+        return grading, {"grading": grading}
+
+    monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", fake_evaluate_candidate)
+    candidate = {
+        "linkedin_profile_id": "ada-example",
+        "linkedin_url": "https://www.linkedin.com/in/ada-example/",
+        "candidate_name": "Ada Example",
+        "source_row": {},
+    }
+
+    result = _evaluate_candidate_for_run(
+        "unused-api-key",
+        "unused-model",
+        "unused-rubric",
+        candidate,
+        get_role_profile("ai_engineer_trj"),
+    )
+
+    assert result["state"] == "completed"
+
+
+def test_ai_engineer_full_evaluation_flow_still_skips_invalid_scores(monkeypatch) -> None:
+    grading = _valid_ai_row()
+    grading["Final Score (/100)"] = 79
+
+    def fake_evaluate_candidate(**_kwargs):
+        return grading, {"grading": grading}
+
+    monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", fake_evaluate_candidate)
+    candidate = {
+        "linkedin_profile_id": "ada-example",
+        "linkedin_url": "https://www.linkedin.com/in/ada-example/",
+        "candidate_name": "Ada Example",
+        "source_row": {},
+    }
+
+    result = _evaluate_candidate_for_run(
+        "unused-api-key",
+        "unused-model",
+        "unused-rubric",
+        candidate,
+        get_role_profile("ai_engineer_trj"),
+    )
+
+    assert result["state"] == "skipped"
+    assert "must equal category score sum" in result["error"]
 
 
 def test_ai_engineer_ranking_uses_documented_capability_order() -> None:

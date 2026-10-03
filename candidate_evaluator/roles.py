@@ -36,6 +36,7 @@ class RoleProfile:
     ranking_tiebreaker_columns: Optional[list[str]] = None
     strongest_evidence_columns: Optional[list[str]] = None
     rationale_min_words: int = 0
+    rationale_max_words: int = 75
     evidence_sources: Optional[list[str]] = None
     require_experience: bool = False
     skip_if_no_evidence: bool = True
@@ -414,7 +415,8 @@ ROLE_PROFILES = {
             "Strongest Evidence 2",
             "Strongest Evidence 3",
         ],
-        rationale_min_words=50,
+        rationale_min_words=0,
+        rationale_max_words=0,
         evidence_sources=["Location", "Headline", "About", "All experiences", "Projects"],
         skip_if_no_evidence=False,
     ),

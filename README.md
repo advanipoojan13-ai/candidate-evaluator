@@ -1,6 +1,6 @@
 # Candidate Evaluator
 
-A local Streamlit app for evaluating Apify LinkedIn profile JSON files against a rubric with the OpenAI API.
+A local Streamlit app for evaluating Apify LinkedIn profile JSON files against a rubric with OpenAI or DeepSeek.
 
 ## Run
 
@@ -37,18 +37,29 @@ Select **Custom Role**, upload the role's rubric, and complete the setup table. 
 - outcome bands cover every score from 0 through the combined maximum without gaps or overlaps
 - at least one permitted LinkedIn evidence source is selected
 
-The app builds the OpenAI JSON schema and export columns from that configuration. It validates every response again before saving it: category values, allowed discrete scores, total-score arithmetic, outcome band, required columns, evidence count, and rationale length. Profiles missing identity or all selected evidence are skipped individually without stopping the run or making an OpenAI call.
+The app builds the JSON schema and export columns from that configuration. It validates every response again before saving it: category values, allowed discrete scores, total-score arithmetic, outcome band, required columns, evidence count, and rationale length. Profiles missing identity or all selected evidence are skipped individually without stopping the run or making a paid API call.
 
-Custom roles can independently permit location, headline, About, projects, experiences 0-4, all experiences, current company, role titles, durations, global skills, experience-level skills, education, website, open-to-work, hiring, and services signals. Only the selected evidence is included in the OpenAI candidate payload.
+Custom roles can independently permit location, headline, About, projects, experiences 0-4, all experiences, current company, role titles, durations, global skills, experience-level skills, education, website, open-to-work, hiring, and services signals. Only the selected evidence is included in the provider request.
+
+## AI Providers
+
+Use **AI provider** to choose OpenAI or DeepSeek. The model menu changes with the provider.
+
+- OpenAI keeps the existing strict Chat Completions JSON-schema flow.
+- DeepSeek uses `https://api.deepseek.com` and its Responses API structured-output flow.
+- DeepSeek Flash is the default DeepSeek model; DeepSeek V4 Pro is also available.
+- DeepSeek reasoning defaults to **Off (lowest cost)** and can be changed to Low, High, or Maximum.
+
+Each run stores its provider, model, and reasoning setting so resume and retry use the original configuration. API keys are never saved; paste the matching provider key again when resuming a run.
 
 ## Safety
 
-The app does not hardcode or save the OpenAI API key. Evaluation cannot start unless both are true:
+The app does not hardcode or save provider API keys. Evaluation cannot start unless both are true:
 
 - an API key is pasted into the password field
-- `I approve paid OpenAI API calls for this run` is checked
+- the paid API-call approval for the selected provider is checked
 
-The preview flow makes no OpenAI API calls.
+The preview flow makes no provider API calls.
 
 ## Progress And Outputs
 

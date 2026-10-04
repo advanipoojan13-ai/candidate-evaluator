@@ -10,6 +10,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, 
 
 from .evidence import custom_evidence_payload
 from .extractor import merge_duplicate_experiences
+from .providers import DEFAULT_PROVIDER_KEY, ProviderProfile, get_provider
 from .roles import RoleProfile, get_role_profile
 
 
@@ -21,57 +22,121 @@ def evaluate_candidate(
     candidate: dict[str, Any],
     role_key: str = "design",
     role_profile: Optional[RoleProfile] = None,
+    provider_key: str = DEFAULT_PROVIDER_KEY,
+    reasoning_effort: str = "none",
     max_retries: int = 5,
+    max_format_retries: int = 2,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    client = OpenAI(api_key=api_key)
+    provider = get_provider(provider_key)
+    client_kwargs: dict[str, Any] = {"api_key": api_key}
+    if provider.base_url:
+        client_kwargs["base_url"] = provider.base_url
+    client = OpenAI(**client_kwargs)
     role = role_profile or get_role_profile(role_key)
-    response = _call_with_backoff(client, model, rubric_text, candidate, role, max_retries=max_retries)
-    content = response.choices[0].message.content or "{}"
-    raw = json.loads(content)
-    grading = raw["grading"]
-    return grading, raw
+    for format_attempt in range(max_format_retries + 1):
+        response = _call_with_backoff(
+            client,
+            provider,
+            model,
+            rubric_text,
+            candidate,
+            role,
+            reasoning_effort=reasoning_effort,
+            max_retries=max_retries,
+        )
+        try:
+            content = _response_content(response, provider)
+            raw = json.loads(content)
+            grading = raw["grading"]
+            if not isinstance(grading, dict):
+                raise ValueError("The grading field is not a JSON object.")
+            return grading, raw
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            if format_attempt >= max_format_retries:
+                raise
+            time.sleep(0.5 * (format_attempt + 1))
+    raise RuntimeError(f"{provider.label} returned unreadable output after retries.")
 
 
 def _call_with_backoff(
     client: OpenAI,
+    provider: ProviderProfile,
     model: str,
     rubric_text: str,
     candidate: dict[str, Any],
     role: RoleProfile,
+    reasoning_effort: str,
     max_retries: int,
 ) -> Any:
     for attempt in range(max_retries + 1):
         try:
-            return client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": _system_prompt(role)},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "rubric": rubric_text,
-                                "candidate": _candidate_payload(candidate, role),
-                                "instructions": role.instructions,
-                            },
-                            ensure_ascii=False,
-                        ),
-                    },
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "candidate_evaluation",
-                        "strict": True,
-                        "schema": _response_schema(role),
-                    },
-                },
-            )
+            return _create_response(client, provider, model, rubric_text, candidate, role, reasoning_effort)
         except (RateLimitError, APIConnectionError, APITimeoutError, APIStatusError) as exc:
             if attempt >= max_retries or not _is_retryable(exc):
                 raise
             time.sleep(_retry_delay_seconds(exc, attempt))
-    raise RuntimeError("OpenAI request failed after retries.")
+    raise RuntimeError(f"{provider.label} request failed after retries.")
+
+
+def _create_response(
+    client: OpenAI,
+    provider: ProviderProfile,
+    model: str,
+    rubric_text: str,
+    candidate: dict[str, Any],
+    role: RoleProfile,
+    reasoning_effort: str,
+) -> Any:
+    request_input = json.dumps(
+        {
+            "rubric": rubric_text,
+            "candidate": _candidate_payload(candidate, role),
+            "instructions": role.instructions,
+            "output_requirement": "Return JSON that exactly matches the supplied candidate evaluation schema.",
+        },
+        ensure_ascii=False,
+    )
+    schema = _response_schema(role)
+    if provider.transport == "responses":
+        return client.responses.create(
+            model=model,
+            instructions=_system_prompt(role),
+            input=request_input,
+            reasoning={"effort": reasoning_effort or provider.default_reasoning_effort},
+            max_output_tokens=16000,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "candidate_evaluation",
+                    "schema": schema,
+                }
+            },
+        )
+    return client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": _system_prompt(role)},
+            {"role": "user", "content": request_input},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "candidate_evaluation",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+    )
+
+
+def _response_content(response: Any, provider: ProviderProfile) -> str:
+    if provider.transport == "responses":
+        content = getattr(response, "output_text", "") or ""
+    else:
+        content = response.choices[0].message.content or ""
+    if not content.strip():
+        raise ValueError(f"{provider.label} returned an empty response.")
+    return content
 
 
 def _is_retryable(exc: Exception) -> bool:

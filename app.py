@@ -11,7 +11,7 @@ import hmac
 
 import streamlit as st
 
-from candidate_evaluator.constants import DEFAULT_MODEL, DEFAULT_PARALLEL_OPENAI_CALLS, MODEL_OPTIONS, OUTPUTS_DIR
+from candidate_evaluator.constants import DEFAULT_PARALLEL_OPENAI_CALLS, OUTPUTS_DIR
 from candidate_evaluator.extractor import (
     candidate_input_issue,
     candidate_input_issues,
@@ -40,6 +40,7 @@ from candidate_evaluator.progress import (
     save_exports,
     set_current,
 )
+from candidate_evaluator.providers import DEFAULT_PROVIDER_KEY, get_provider, provider_options
 from candidate_evaluator.roles import (
     CUSTOM_EVIDENCE_SOURCES,
     CUSTOM_ROLE_KEY,
@@ -66,6 +67,7 @@ def main() -> None:
     with st.sidebar:
         st.header("Inputs")
         role_key = _role_selector()
+        provider_key = _provider_selector()
         json_upload = st.file_uploader("LinkedIn JSON", type=["json"])
         sample_path = st.text_input("Or JSON file path", value=DEFAULT_SAMPLE_PATH if Path(DEFAULT_SAMPLE_PATH).exists() else "")
         rubric_upload = st.file_uploader("Rubric Markdown", type=["md", "txt"], key=f"rubric-upload-{role_key}")
@@ -74,16 +76,18 @@ def main() -> None:
             value=_default_rubric_path(role_key),
             key=f"rubric-path-{role_key}",
         )
-        model = _model_selector()
+        model = _model_selector(provider_key)
+        reasoning_effort = _reasoning_selector(provider_key)
+        provider = get_provider(provider_key)
         parallel_calls = st.number_input(
-            "Parallel OpenAI calls",
+            "Parallel API calls",
             min_value=1,
             max_value=20,
             value=DEFAULT_PARALLEL_OPENAI_CALLS,
             step=1,
         )
-        api_key = st.text_input("OpenAI API key", type="password")
-        approved = st.checkbox("I approve paid OpenAI API calls for this run")
+        api_key = st.text_input(f"{provider.label} API key", type="password")
+        approved = st.checkbox(f"I approve paid {provider.label} API calls for this run")
 
     candidates, rubric_text = _load_inputs(json_upload, sample_path, rubric_upload, rubric_path)
     custom_role_config, custom_role_errors = _custom_role_editor(role_key)
@@ -96,7 +100,9 @@ def main() -> None:
         role_key,
         custom_role_config,
         custom_role_errors,
+        provider_key,
         model,
+        reasoning_effort,
         int(parallel_calls),
         api_key,
         approved,
@@ -127,6 +133,12 @@ def _require_access() -> None:
 def _role_selector() -> str:
     options = role_options()
     selected_label = st.selectbox("Evaluation role", options=list(options), index=0)
+    return options[selected_label]
+
+
+def _provider_selector() -> str:
+    options = provider_options()
+    selected_label = st.selectbox("AI provider", options=list(options), index=0)
     return options[selected_label]
 
 
@@ -290,25 +302,49 @@ def _parse_allowed_scores(value: Any) -> list[Any]:
     return parsed
 
 
-def _model_selector() -> str:
-    custom_options = _custom_model_options()
-    model_options = {**MODEL_OPTIONS, **custom_options}
+def _model_selector(provider_key: str) -> str:
+    provider = get_provider(provider_key)
+    custom_options = _custom_model_options(provider_key)
+    model_options = {**provider.model_options, **custom_options}
     labels = list(model_options)
-    default_index = labels.index("GPT-5.5") if "GPT-5.5" in labels else 0
-    selected_label = st.selectbox("OpenAI model", options=labels, index=default_index)
+    default_label = next(
+        (label for label, model_id in model_options.items() if model_id == provider.default_model),
+        labels[0],
+    )
+    default_index = labels.index(default_label)
+    selected_label = st.selectbox(f"{provider.label} model", options=labels, index=default_index)
     selected_model = model_options[selected_label]
     if selected_label == "Custom":
-        return st.text_input("Custom model name", value=DEFAULT_MODEL).strip()
+        return st.text_input("Custom model name", value=provider.default_model).strip()
     st.caption(f"API model: `{selected_model}`")
     return selected_model
 
 
-def _custom_model_options() -> dict[str, str]:
+def _reasoning_selector(provider_key: str) -> str:
+    provider = get_provider(provider_key)
+    if not provider.reasoning_options:
+        return provider.default_reasoning_effort
+    labels = list(provider.reasoning_options)
+    default_label = next(
+        (
+            label
+            for label, effort in provider.reasoning_options.items()
+            if effort == provider.default_reasoning_effort
+        ),
+        labels[0],
+    )
+    selected_label = st.selectbox("Reasoning effort", options=labels, index=labels.index(default_label))
+    return provider.reasoning_options[selected_label]
+
+
+def _custom_model_options(provider_key: str = DEFAULT_PROVIDER_KEY) -> dict[str, str]:
+    provider = get_provider(provider_key)
     with st.expander("Add custom model options"):
         raw_models = st.text_area(
             "Extra model names",
-            placeholder="Paste exact model IDs, one per line. Example:\ngpt-4o-mini\ngpt-4.1-mini",
-            help="Use this when OpenAI gives you access to a model that is not listed above.",
+            placeholder=f"Paste exact {provider.label} model IDs, one per line.",
+            help=f"Use this when {provider.label} gives you access to a model that is not listed above.",
+            key=f"custom-model-options-{provider.key}",
         )
     options = {}
     for model in _parse_custom_models(raw_models):
@@ -381,7 +417,7 @@ def _show_preview(candidates: list[dict[str, Any]], rubric_text: str, role: Role
     issues = _candidate_input_issues_for_role(candidates, role)
     if issues:
         skipped_count = sum(bool(_candidate_input_issue_for_role(candidate, role)) for candidate in candidates)
-        st.warning(f"{skipped_count} of {len(candidates)} profile(s) will be skipped without an OpenAI call.")
+        st.warning(f"{skipped_count} of {len(candidates)} profile(s) will be skipped without an API call.")
         for issue in issues:
             st.write(f"- {issue}")
         st.info(
@@ -418,12 +454,21 @@ def _run_matches_role_config(
     run_id: str,
     role_key: str,
     custom_role_config: dict[str, Any] | None,
+    provider_key: str,
+    model: str,
+    reasoning_effort: str,
 ) -> bool:
     try:
         status = load_status(run_id)
     except Exception:
         return False
     if status.get("role", DEFAULT_ROLE_KEY) != role_key:
+        return False
+    if status.get("provider", DEFAULT_PROVIDER_KEY) != provider_key:
+        return False
+    if status.get("model") != model:
+        return False
+    if status.get("reasoning_effort", "none") != reasoning_effort:
         return False
     if role_key == CUSTOM_ROLE_KEY:
         return status.get("custom_role_config") == custom_role_config
@@ -436,7 +481,9 @@ def _show_run_controls(
     role_key: str,
     custom_role_config: dict[str, Any] | None,
     custom_role_errors: list[str],
+    provider_key: str,
     model: str,
+    reasoning_effort: str,
     parallel_calls: int,
     api_key: str,
     approved: bool,
@@ -445,6 +492,7 @@ def _show_run_controls(
     existing_run_options = run_select_options()
     selected_run_label = st.selectbox("Resume run", options=[""] + list(existing_run_options), index=0)
     selected_run = existing_run_options.get(selected_run_label, "")
+    selected_run_status = load_status(selected_run) if selected_run else {}
     selected_run_role = role_for_run(selected_run) if selected_run else None
     selected_run_issues = (
         _candidate_input_issues_for_role(load_candidates(selected_run), selected_run_role)
@@ -455,6 +503,14 @@ def _show_run_controls(
         st.warning("This saved run contains profile records that will be skipped.")
         for issue in selected_run_issues:
             st.write(f"- {issue}")
+    if selected_run:
+        saved_provider = get_provider(selected_run_status.get("provider", DEFAULT_PROVIDER_KEY))
+        saved_reasoning = selected_run_status.get("reasoning_effort", "none")
+        reasoning_label = f", reasoning: {saved_reasoning}" if saved_provider.reasoning_options else ""
+        st.caption(
+            f"Saved run provider: {saved_provider.label}; model: "
+            f"`{selected_run_status.get('model', 'unknown')}`{reasoning_label}."
+        )
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -471,12 +527,21 @@ def _show_run_controls(
         export_clicked = st.button("Save exports", disabled=not selected_run)
 
     session_run = st.session_state.get("active_run_id", "")
-    if session_run and not _run_matches_role_config(session_run, role_key, custom_role_config):
+    if session_run and not _run_matches_role_config(
+        session_run,
+        role_key,
+        custom_role_config,
+        provider_key,
+        model,
+        reasoning_effort,
+    ):
         session_run = ""
     active_run = selected_run or session_run
     ran_evaluation = False
     if start_clicked:
-        _require_api_ready(api_key, approved)
+        _require_api_ready(api_key, approved, provider_key)
+        if active_run:
+            _require_run_provider(active_run, provider_key)
         if not active_run:
             active_run = make_run_id()
             init_run(
@@ -486,14 +551,17 @@ def _show_run_controls(
                 model,
                 role_key,
                 custom_role_config=custom_role_config,
+                provider_key=provider_key,
+                reasoning_effort=reasoning_effort,
             )
             st.session_state["active_run_id"] = active_run
-        _run_evaluation(active_run, api_key, model, parallel_calls, retry_failed=False)
+        _run_evaluation(active_run, api_key, parallel_calls, retry_failed=False)
         ran_evaluation = True
 
     if retry_clicked:
-        _require_api_ready(api_key, approved)
-        _run_evaluation(selected_run, api_key, model, parallel_calls, retry_failed=True)
+        _require_api_ready(api_key, approved, provider_key)
+        _require_run_provider(selected_run, provider_key)
+        _run_evaluation(selected_run, api_key, parallel_calls, retry_failed=True)
         ran_evaluation = True
 
     if export_clicked:
@@ -507,21 +575,38 @@ def _show_run_controls(
         _show_downloads(active_run)
 
 
-def _require_api_ready(api_key: str, approved: bool) -> None:
+def _require_api_ready(api_key: str, approved: bool, provider_key: str) -> None:
+    provider = get_provider(provider_key)
     if not approved:
-        st.error("Approve OpenAI API calls before starting an evaluation.")
+        st.error(f"Approve paid {provider.label} API calls before starting an evaluation.")
         st.stop()
     if not api_key:
-        st.error("Paste an OpenAI API key before starting an evaluation.")
+        st.error(f"Paste a {provider.label} API key before starting an evaluation.")
         st.stop()
 
 
-def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, retry_failed: bool) -> None:
+def _require_run_provider(run_id: str, provider_key: str) -> None:
+    status = load_status(run_id)
+    saved_provider_key = status.get("provider", DEFAULT_PROVIDER_KEY)
+    if saved_provider_key == provider_key:
+        return
+    saved_provider = get_provider(saved_provider_key)
+    st.error(
+        f"This saved run uses {saved_provider.label}. Select {saved_provider.label} as the AI provider "
+        f"and paste its API key before resuming."
+    )
+    st.stop()
+
+
+def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed: bool) -> None:
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     candidates = load_candidates(run_id)
     reset_running(run_id)
     status = load_status(run_id)
+    provider_key = status.get("provider", DEFAULT_PROVIDER_KEY)
+    model = status.get("model") or get_provider(provider_key).default_model
+    reasoning_effort = status.get("reasoning_effort", "none")
     role = role_for_run(run_id)
     status_by_id = status.get("candidates", {})
     completed_row_ids = set(result_rows_by_id(run_id))
@@ -570,7 +655,18 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while pending and len(active) < max_workers:
-            _submit_candidate(executor, active, pending, run_id, api_key, model, rubric_text, role)
+            _submit_candidate(
+                executor,
+                active,
+                pending,
+                run_id,
+                api_key,
+                provider_key,
+                model,
+                reasoning_effort,
+                rubric_text,
+                role,
+            )
         _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
         while active:
@@ -595,7 +691,18 @@ def _run_evaluation(run_id: str, api_key: str, model: str, parallel_calls: int, 
                 progress.progress(completed_in_pass / total)
 
                 if pending:
-                    _submit_candidate(executor, active, pending, run_id, api_key, model, rubric_text, role)
+                    _submit_candidate(
+                        executor,
+                        active,
+                        pending,
+                        run_id,
+                        api_key,
+                        provider_key,
+                        model,
+                        reasoning_effort,
+                        rubric_text,
+                        role,
+                    )
 
             _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
@@ -609,14 +716,25 @@ def _submit_candidate(
     pending: list[dict[str, Any]],
     run_id: str,
     api_key: str,
+    provider_key: str,
     model: str,
+    reasoning_effort: str,
     rubric_text: str,
     role: RoleProfile,
 ) -> None:
     candidate = pending.pop(0)
     candidate_id = candidate["linkedin_profile_id"]
     set_current(run_id, candidate_id)
-    future = executor.submit(_evaluate_candidate_for_run, api_key, model, rubric_text, candidate, role)
+    future = executor.submit(
+        _evaluate_candidate_for_run,
+        api_key,
+        model,
+        rubric_text,
+        candidate,
+        role,
+        provider_key,
+        reasoning_effort,
+    )
     active[future] = candidate
 
 
@@ -626,6 +744,8 @@ def _evaluate_candidate_for_run(
     rubric_text: str,
     candidate: dict[str, Any],
     role: RoleProfile,
+    provider_key: str = DEFAULT_PROVIDER_KEY,
+    reasoning_effort: str = "none",
 ) -> dict[str, Any]:
     import time
 
@@ -635,7 +755,9 @@ def _evaluate_candidate_for_run(
 
         grading, raw = evaluate_candidate(
             api_key=api_key,
+            provider_key=provider_key,
             model=model,
+            reasoning_effort=reasoning_effort,
             rubric_text=rubric_text,
             candidate=candidate,
             role_profile=role,

@@ -95,6 +95,27 @@ def test_progress_stores_role_and_uses_qa_decision_column(tmp_path: Path, monkey
     ]
 
 
+def test_progress_stores_provider_model_and_reasoning_without_api_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidates = [
+        {"source_index": 0, "linkedin_profile_id": "a", "source_row": {"Candidate Name": "A"}},
+    ]
+    init_run(
+        "run-deepseek",
+        candidates,
+        "rubric",
+        "deepseek-flash",
+        provider_key="deepseek",
+        reasoning_effort="low",
+    )
+
+    status = load_status("run-deepseek")
+    assert status["provider"] == "deepseek"
+    assert status["model"] == "deepseek-flash"
+    assert status["reasoning_effort"] == "low"
+    assert "api_key" not in status
+
+
 def test_backend_progress_uses_final_score_and_computed_rank(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     candidates = [

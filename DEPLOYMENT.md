@@ -18,7 +18,7 @@ Mac are not uploaded with the application. Download exports as a separate backup
 ## Before You Deploy
 
 - Do not upload `.venv/`, `work/`, `outputs/`, or local result files to GitHub.
-- Do not hardcode an OpenAI API key. The app asks for the key in the UI.
+- Do not hardcode OpenAI or DeepSeek API keys. The app asks for the selected provider's key in the UI.
 - Uploaded candidate JSON files and rubrics should be uploaded through the deployed app UI.
 
 ## GitHub Files Needed
@@ -56,7 +56,7 @@ Do not upload:
 2. Upload the LinkedIn JSON file.
 3. Upload the rubric Markdown file.
 4. Choose the evaluation role.
-5. Paste the OpenAI API key.
+5. Choose OpenAI or DeepSeek, select its model, and paste that provider's API key.
 6. Preview the first five candidates.
 7. Approve API calls.
 8. Start evaluation.

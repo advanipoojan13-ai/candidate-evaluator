@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover - non-Unix fallback
     fcntl = None
 
 from .constants import OUTPUTS_DIR, RUNS_DIR
+from .providers import DEFAULT_PROVIDER_KEY, get_provider
 from .roles import DEFAULT_ROLE_KEY, RoleProfile, get_role_profile, prepare_output_rows
 
 
@@ -32,11 +33,16 @@ def init_run(
     model: str,
     role_key: str = DEFAULT_ROLE_KEY,
     custom_role_config: Optional[dict[str, Any]] = None,
+    provider_key: str = DEFAULT_PROVIDER_KEY,
+    reasoning_effort: str = "none",
 ) -> Path:
     path = run_dir(run_id)
     path.mkdir(parents=True, exist_ok=True)
     _write_json(path / "candidates.json", candidates)
-    _write_json(path / "status.json", _initial_status(candidates, model, role_key, custom_role_config))
+    _write_json(
+        path / "status.json",
+        _initial_status(candidates, model, role_key, custom_role_config, provider_key, reasoning_effort),
+    )
     (path / "rubric.md").write_text(rubric_text, encoding="utf-8")
     for name in ("rows.jsonl", "failed.jsonl", "skipped.jsonl", "raw_responses.jsonl"):
         (path / name).touch(exist_ok=True)
@@ -66,8 +72,10 @@ def run_select_options() -> dict[str, str]:
             options[f"{run_id} — invalid saved role configuration"] = run_id
             continue
         counts = _counts_from_status(status)
+        provider = get_provider(status.get("provider", DEFAULT_PROVIDER_KEY))
         label = (
-            f"{run_id} — {role.label} — {counts['completed']} done / "
+            f"{run_id} — {role.label} — {provider.label} / {status.get('model', 'unknown model')} — "
+            f"{counts['completed']} done / "
             f"{counts['failed']} failed / {counts['skipped']} skipped"
         )
         options[label] = run_id
@@ -321,9 +329,13 @@ def _initial_status(
     model: str,
     role_key: str,
     custom_role_config: Optional[dict[str, Any]] = None,
+    provider_key: str = DEFAULT_PROVIDER_KEY,
+    reasoning_effort: str = "none",
 ) -> dict[str, Any]:
     return {
         "model": model,
+        "provider": provider_key,
+        "reasoning_effort": reasoning_effort,
         "role": role_key,
         "custom_role_config": custom_role_config if role_key == "custom" else None,
         "created_at": datetime.now().isoformat(timespec="seconds"),

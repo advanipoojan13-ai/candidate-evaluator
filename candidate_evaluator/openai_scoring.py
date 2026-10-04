@@ -10,7 +10,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, 
 
 from .evidence import custom_evidence_payload
 from .extractor import merge_duplicate_experiences
-from .providers import DEFAULT_PROVIDER_KEY, ProviderProfile, get_provider
+from .providers import DEEPSEEK_PROVIDER_KEY, DEFAULT_PROVIDER_KEY, ProviderProfile, get_provider
 from .roles import RoleProfile, get_role_profile
 
 
@@ -33,7 +33,12 @@ def evaluate_candidate(
         client_kwargs["base_url"] = provider.base_url
     client = OpenAI(**client_kwargs)
     role = role_profile or get_role_profile(role_key)
-    for format_attempt in range(max_format_retries + 1):
+    # DeepSeek format failures must not trigger another paid evaluation. Its
+    # Responses API can return a complete JSON object with extra surrounding
+    # text, so recover that object locally instead. Keep the existing format
+    # retry behaviour for other providers.
+    format_attempts = 1 if provider.key == DEEPSEEK_PROVIDER_KEY else max_format_retries + 1
+    for format_attempt in range(format_attempts):
         response = _call_with_backoff(
             client,
             provider,
@@ -44,18 +49,44 @@ def evaluate_candidate(
             reasoning_effort=reasoning_effort,
             max_retries=max_retries,
         )
+        content = ""
         try:
             content = _response_content(response, provider)
-            raw = json.loads(content)
+            raw = _parse_response_json(content, allow_surrounding_text=provider.key == DEEPSEEK_PROVIDER_KEY)
             grading = raw["grading"]
             if not isinstance(grading, dict):
                 raise ValueError("The grading field is not a JSON object.")
             return grading, raw
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            if format_attempt >= max_format_retries:
-                raise
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            if format_attempt >= format_attempts - 1:
+                raise ModelOutputFormatError(str(exc), content) from exc
             time.sleep(0.5 * (format_attempt + 1))
     raise RuntimeError(f"{provider.label} returned unreadable output after retries.")
+
+
+class ModelOutputFormatError(ValueError):
+    """Preserve unreadable provider output for diagnostics without retrying it."""
+
+    def __init__(self, message: str, raw_content: str) -> None:
+        super().__init__(message)
+        self.raw_content = raw_content
+
+
+def _parse_response_json(content: str, *, allow_surrounding_text: bool) -> dict[str, Any]:
+    if not allow_surrounding_text:
+        parsed = json.loads(content)
+    else:
+        # raw_decode parses one complete JSON value and intentionally leaves any
+        # trailing provider commentary untouched. Finding the first opening brace
+        # also handles prose or a Markdown code fence before the JSON object.
+        stripped = content.lstrip()
+        object_start = stripped.find("{")
+        if object_start < 0:
+            raise json.JSONDecodeError("No JSON object found", content, 0)
+        parsed, _ = json.JSONDecoder().raw_decode(stripped[object_start:])
+    if not isinstance(parsed, dict):
+        raise TypeError("The candidate evaluation response is not a JSON object.")
+    return parsed
 
 
 def _call_with_backoff(

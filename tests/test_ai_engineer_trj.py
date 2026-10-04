@@ -6,7 +6,7 @@ import pytest
 
 from app import _default_rubric_path, _evaluate_candidate_for_run
 from candidate_evaluator.extractor import candidate_input_issue, normalize_candidate
-from candidate_evaluator.openai_scoring import _candidate_payload, _response_schema
+from candidate_evaluator.openai_scoring import ModelOutputFormatError, _candidate_payload, _response_schema
 from candidate_evaluator.roles import get_role_profile, prepare_output_rows, role_options
 from candidate_evaluator.validation import validate_output_row
 
@@ -137,6 +137,35 @@ def test_ai_engineer_full_evaluation_flow_still_skips_invalid_scores(monkeypatch
 
     assert result["state"] == "skipped"
     assert "must equal category score sum" in result["error"]
+
+
+def test_ai_engineer_unreadable_output_is_skipped_and_preserved(monkeypatch) -> None:
+    malformed = '{"grading": {"Final Score (/100)": 80,}}'
+
+    def fake_evaluate_candidate(**_kwargs):
+        raise ModelOutputFormatError("malformed JSON", malformed)
+
+    monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", fake_evaluate_candidate)
+    candidate = {
+        "linkedin_profile_id": "ada-example",
+        "linkedin_url": "https://www.linkedin.com/in/ada-example/",
+        "candidate_name": "Ada Example",
+        "source_row": {},
+    }
+
+    result = _evaluate_candidate_for_run(
+        "unused-api-key",
+        "unused-model",
+        "unused-rubric",
+        candidate,
+        get_role_profile("ai_engineer_trj"),
+        provider_key="deepseek",
+        reasoning_effort="high",
+    )
+
+    assert result["state"] == "skipped"
+    assert result["raw"] == {"unparsed_content": malformed}
+    assert "malformed JSON" in result["error"]
 
 
 def test_ai_engineer_ranking_uses_documented_capability_order() -> None:

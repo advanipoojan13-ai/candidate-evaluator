@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from candidate_evaluator import openai_scoring
-from candidate_evaluator.openai_scoring import evaluate_candidate
+from candidate_evaluator.openai_scoring import ModelOutputFormatError, evaluate_candidate
 from candidate_evaluator.providers import (
     DEEPSEEK_PROVIDER_KEY,
     OPENAI_PROVIDER_KEY,
@@ -116,17 +118,33 @@ def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:
     assert request["response_format"]["json_schema"]["strict"] is True
 
 
-def test_empty_deepseek_response_is_retried_before_candidate_is_skipped(monkeypatch) -> None:
-    valid = json.dumps({"grading": {"Total Score": 0}})
+def test_deepseek_accepts_valid_json_with_trailing_text_without_retry(monkeypatch) -> None:
+    valid = json.dumps({"grading": {"Total Score": 42}})
     client = _FakeClient({"grading": {}})
-    client.responses = _FakeEndpoint(
-        [
-            SimpleNamespace(output_text=""),
-            SimpleNamespace(output_text=valid),
-        ]
-    )
+    client.responses = _FakeEndpoint(SimpleNamespace(output_text=valid + "\nAdditional explanation"))
     monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
-    monkeypatch.setattr(openai_scoring.time, "sleep", lambda seconds: None)
+
+    grading, raw = evaluate_candidate(
+        api_key="deepseek-key",
+        provider_key=DEEPSEEK_PROVIDER_KEY,
+        model="deepseek-flash",
+        rubric_text="A rubric",
+        candidate=_candidate(),
+        role_profile=get_role_profile("design"),
+        max_retries=0,
+    )
+
+    assert grading == {"Total Score": 42}
+    assert raw == {"grading": {"Total Score": 42}}
+    assert len(client.responses.calls) == 1
+
+
+def test_deepseek_uses_first_complete_json_when_another_object_follows(monkeypatch) -> None:
+    first = json.dumps({"grading": {"Total Score": 42}})
+    second = json.dumps({"grading": {"Total Score": 99}})
+    client = _FakeClient({"grading": {}})
+    client.responses = _FakeEndpoint(SimpleNamespace(output_text=first + second))
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
 
     grading, _ = evaluate_candidate(
         api_key="deepseek-key",
@@ -136,8 +154,80 @@ def test_empty_deepseek_response_is_retried_before_candidate_is_skipped(monkeypa
         candidate=_candidate(),
         role_profile=get_role_profile("design"),
         max_retries=0,
-        max_format_retries=1,
     )
 
-    assert grading == {"Total Score": 0}
-    assert len(client.responses.calls) == 2
+    assert grading == {"Total Score": 42}
+    assert len(client.responses.calls) == 1
+
+
+def test_deepseek_accepts_json_surrounded_by_markdown_without_retry(monkeypatch) -> None:
+    valid = json.dumps({"grading": {"Total Score": 31}})
+    client = _FakeClient({"grading": {}})
+    client.responses = _FakeEndpoint(SimpleNamespace(output_text=f"Result:\n```json\n{valid}\n```"))
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
+
+    grading, _ = evaluate_candidate(
+        api_key="deepseek-key",
+        provider_key=DEEPSEEK_PROVIDER_KEY,
+        model="deepseek-flash",
+        rubric_text="A rubric",
+        candidate=_candidate(),
+        role_profile=get_role_profile("design"),
+        max_retries=0,
+    )
+
+    assert grading == {"Total Score": 31}
+    assert len(client.responses.calls) == 1
+
+
+def test_malformed_deepseek_response_is_not_retried(monkeypatch) -> None:
+    malformed = '{"grading": {"Total Score": 10,}}'
+    client = _FakeClient({"grading": {}})
+    client.responses = _FakeEndpoint(
+        [
+            SimpleNamespace(output_text=malformed),
+            SimpleNamespace(output_text=json.dumps({"grading": {"Total Score": 10}})),
+        ]
+    )
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
+
+    with pytest.raises(ModelOutputFormatError) as caught:
+        evaluate_candidate(
+            api_key="deepseek-key",
+            provider_key=DEEPSEEK_PROVIDER_KEY,
+            model="deepseek-flash",
+            rubric_text="A rubric",
+            candidate=_candidate(),
+            role_profile=get_role_profile("design"),
+            max_retries=0,
+            max_format_retries=5,
+        )
+
+    assert caught.value.raw_content == malformed
+    assert len(client.responses.calls) == 1
+
+
+def test_empty_deepseek_response_is_not_retried(monkeypatch) -> None:
+    valid = json.dumps({"grading": {"Total Score": 0}})
+    client = _FakeClient({"grading": {}})
+    client.responses = _FakeEndpoint(
+        [
+            SimpleNamespace(output_text=""),
+            SimpleNamespace(output_text=valid),
+        ]
+    )
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
+
+    with pytest.raises(ModelOutputFormatError):
+        evaluate_candidate(
+            api_key="deepseek-key",
+            provider_key=DEEPSEEK_PROVIDER_KEY,
+            model="deepseek-flash",
+            rubric_text="A rubric",
+            candidate=_candidate(),
+            role_profile=get_role_profile("design"),
+            max_retries=0,
+            max_format_retries=1,
+        )
+
+    assert len(client.responses.calls) == 1

@@ -780,10 +780,11 @@ def _evaluate_candidate_for_run(
             }
         return {"state": "completed", "row": row, "raw": raw, "elapsed_seconds": time.monotonic() - started}
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raw_content = getattr(exc, "raw_content", "")
         return {
             "state": "skipped",
             "error": f"Skipped after API call because the grading output was empty or unreadable: {exc}",
-            "raw": {},
+            "raw": {"unparsed_content": raw_content} if raw_content else {},
             "elapsed_seconds": time.monotonic() - started,
         }
     except Exception as exc:

@@ -103,6 +103,23 @@ def save_status(run_id: str, status: dict[str, Any]) -> None:
         _write_json(run_dir(run_id) / "status.json", status)
 
 
+def record_api_usage(run_id: str, usage: dict[str, Any]) -> None:
+    """Add one provider-reported API usage receipt to a run."""
+    if not usage or not usage.get("api_calls"):
+        return
+    with _locked_run(run_id):
+        status = load_status(run_id)
+        if status.get("_load_error"):
+            raise RuntimeError(f"Could not update API usage for run {run_id}: {status['_load_error']}")
+        totals = status.setdefault("api_usage", _empty_api_usage())
+        for field in _empty_api_usage():
+            try:
+                totals[field] = int(totals.get(field, 0)) + int(usage.get(field, 0))
+            except (TypeError, ValueError):
+                totals[field] = int(totals.get(field, 0))
+        _write_json(run_dir(run_id) / "status.json", status)
+
+
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -296,6 +313,7 @@ def progress_counts(run_id: str) -> dict[str, Any]:
         if item.get("state") in {"completed", "failed", "skipped"} and item.get("elapsed_seconds") is not None
     ]
     avg_seconds = sum(elapsed_values) / len(elapsed_values) if elapsed_values else 0.0
+    usage = {**_empty_api_usage(), **(status.get("api_usage") or {})}
     return {
         "total": total,
         "evaluated": evaluated,
@@ -307,6 +325,7 @@ def progress_counts(run_id: str) -> dict[str, Any]:
         "current_candidate": _running_candidate_names(run_id, entries),
         "export_ready": completed > 0,
         "avg_seconds_per_candidate": avg_seconds,
+        "api_usage": usage,
     }
 
 
@@ -340,10 +359,23 @@ def _initial_status(
         "custom_role_config": custom_role_config if role_key == "custom" else None,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "current_candidate": "",
+        "api_usage": _empty_api_usage(),
         "candidates": {
             candidate["linkedin_profile_id"]: {"state": "pending", "error": "", "source_index": candidate["source_index"]}
             for candidate in candidates
         },
+    }
+
+
+def _empty_api_usage() -> dict[str, int]:
+    return {
+        "api_calls": 0,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
     }
 
 

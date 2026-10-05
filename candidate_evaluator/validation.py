@@ -32,6 +32,11 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
             errors.append(f"{column} must be between 0 and {maximum}; got {score}.")
         category_scores.append(score)
 
+    for column, maximum in role.component_score_maxima.items():
+        score = _as_number(row.get(column), column, errors, integer_only=True)
+        if score is not None and (score < 0 or score > maximum):
+            errors.append(f"{column} must be between 0 and {maximum}; got {score}.")
+
     total = _as_number(row.get(role.total_column), role.total_column, errors, integer_only=not role.numeric_scores)
     if total is not None:
         if total > role.total_max:
@@ -78,10 +83,18 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
     role = _resolve_role(role_or_key)
     columns = list(dict.fromkeys(role.output_columns + role.grading_columns))
     fixed = {column: row.get(column, "") for column in columns}
-    numeric_columns = list(role.category_scores) + [role.total_column] + (role.ranking_tiebreaker_columns or [])
+    numeric_columns = (
+        list(role.category_scores)
+        + list(role.component_score_maxima)
+        + [role.total_column]
+        + (role.ranking_tiebreaker_columns or [])
+    )
     for column in numeric_columns:
         if fixed[column] != "":
-            fixed[column] = float(fixed[column]) if role.numeric_scores else int(fixed[column])
+            if column in role.component_score_maxima:
+                fixed[column] = int(fixed[column])
+            else:
+                fixed[column] = float(fixed[column]) if role.numeric_scores else int(fixed[column])
     return fixed
 
 
@@ -93,6 +106,12 @@ def apply_calculated_fields(
     """Add fields that are more reliable and cheaper to calculate in Python."""
     role = _resolve_role(role_or_key)
     calculated = dict(row)
+
+    for category_column, rule in (role.component_scoring or {}).items():
+        component_values = [calculated.get(column) for column in rule.columns]
+        if all(_is_number(value) for value in component_values):
+            raw_score = sum(float(value) for value in component_values)
+            calculated[category_column] = round(raw_score * rule.multiplier, 10)
 
     scores = [calculated.get(column) for column in role.category_scores]
     if all(_is_number(score) for score in scores):
@@ -128,7 +147,10 @@ def _as_int(value: Any, name: str, errors: list[str]) -> Optional[int]:
     try:
         if isinstance(value, bool):
             raise ValueError
-        return int(value)
+        number = float(value)
+        if not number.is_integer():
+            raise ValueError
+        return int(number)
     except (TypeError, ValueError):
         errors.append(f"{name} must be a whole number; got {value!r}.")
         return None

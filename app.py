@@ -31,6 +31,7 @@ from candidate_evaluator.progress import (
     mark_failed,
     mark_skipped,
     progress_counts,
+    record_api_usage,
     reset_running,
     result_rows,
     result_rows_by_id,
@@ -680,7 +681,9 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
             done, _ = wait(active.keys(), return_when=FIRST_COMPLETED)
             for future in done:
                 candidates_in_batch = active.pop(future)
-                results = future.result()
+                batch_result = future.result()
+                record_api_usage(run_id, batch_result["usage"])
+                results = batch_result["results"]
                 for candidate, result in zip(candidates_in_batch, results):
                     candidate_id = candidate["linkedin_profile_id"]
                     if result["state"] == "completed":
@@ -754,7 +757,7 @@ def _evaluate_candidate_batch_for_run(
     role: RoleProfile,
     provider_key: str = DEFAULT_PROVIDER_KEY,
     reasoning_effort: str = "none",
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     import time
 
     started = time.monotonic()
@@ -795,7 +798,7 @@ def _evaluate_candidate_batch_for_run(
                 )
             else:
                 results.append({"state": "completed", "row": row, "raw": raw, "elapsed_seconds": elapsed})
-        return results
+        return {"results": results, "usage": evaluations.usage}
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raw_content = getattr(exc, "raw_content", "")
         result = {
@@ -804,10 +807,13 @@ def _evaluate_candidate_batch_for_run(
             "raw": {"unparsed_content": raw_content} if raw_content else {},
             "elapsed_seconds": time.monotonic() - started,
         }
-        return [dict(result) for _ in candidates]
+        return {
+            "results": [dict(result) for _ in candidates],
+            "usage": getattr(exc, "usage", {}),
+        }
     except Exception as exc:
         result = {"state": "failed", "error": str(exc), "elapsed_seconds": time.monotonic() - started}
-        return [dict(result) for _ in candidates]
+        return {"results": [dict(result) for _ in candidates], "usage": {}}
 
 
 def _evaluate_candidate_for_run(
@@ -889,6 +895,13 @@ def _render_live_status(
     role = role_for_run(run_id)
     with dashboard.container():
         st.write(f"Evaluated: {counts['evaluated']} / {counts['total']}")
+        usage = counts["api_usage"]
+        usage1, usage2, usage3, usage4, usage5 = st.columns(5)
+        usage1.metric("API calls measured", usage["api_calls"])
+        usage2.metric("Input tokens", usage["input_tokens"])
+        usage3.metric("Cached input tokens", usage["cached_input_tokens"])
+        usage4.metric("Output tokens", usage["output_tokens"])
+        usage5.metric("Total tokens", usage["total_tokens"])
         col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
         col1.metric("Completed", counts["completed"])
         col2.metric("Failed", counts["failed"])

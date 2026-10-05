@@ -16,6 +16,18 @@ BATCH_SIZE = 5
 OPENAI_MAX_RETRIES = 2
 
 
+class BatchEvaluationResults(list[tuple[dict[str, Any], dict[str, Any]]]):
+    """Candidate results plus the provider-reported usage for this API response."""
+
+    def __init__(
+        self,
+        values: list[tuple[dict[str, Any], dict[str, Any]]],
+        usage: dict[str, int],
+    ) -> None:
+        super().__init__(values)
+        self.usage = usage
+
+
 def evaluate_candidate(
     *,
     api_key: str,
@@ -57,7 +69,7 @@ def evaluate_candidates(
     provider_key: str = DEFAULT_PROVIDER_KEY,
     reasoning_effort: str = "none",
     max_retries: int = OPENAI_MAX_RETRIES,
-) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+) -> BatchEvaluationResults:
     if not 1 <= len(candidates) <= BATCH_SIZE:
         raise ValueError(f"An evaluation batch must contain between 1 and {BATCH_SIZE} candidates.")
 
@@ -68,6 +80,7 @@ def evaluate_candidates(
     client = OpenAI(**client_kwargs)
     role = role_profile or get_role_profile(role_key)
     response = _create_response(client, provider, model, rubric_text, candidates, role, reasoning_effort)
+    usage = _response_usage(response)
 
     content = ""
     try:
@@ -89,17 +102,71 @@ def evaluate_candidates(
             if not isinstance(grading, dict):
                 raise TypeError("An evaluation grading field is not a JSON object.")
             results.append((grading, item))
-        return results
+        return BatchEvaluationResults(results, usage)
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise ModelOutputFormatError(str(exc), content) from exc
+        raise ModelOutputFormatError(str(exc), content, usage) from exc
 
 
 class ModelOutputFormatError(ValueError):
     """Preserve unreadable provider output for diagnostics without retrying it."""
 
-    def __init__(self, message: str, raw_content: str) -> None:
+    def __init__(self, message: str, raw_content: str, usage: Optional[dict[str, int]] = None) -> None:
         super().__init__(message)
         self.raw_content = raw_content
+        self.usage = usage or _empty_usage()
+
+
+def _response_usage(response: Any) -> dict[str, int]:
+    """Normalize usage returned by Chat Completions or Responses-style providers."""
+    usage = _field(response, "usage")
+    if usage is None:
+        return _empty_usage()
+
+    input_tokens = _integer_field(usage, "prompt_tokens", "input_tokens")
+    output_tokens = _integer_field(usage, "completion_tokens", "output_tokens")
+    total_tokens = _integer_field(usage, "total_tokens") or input_tokens + output_tokens
+    input_details = _field(usage, "prompt_tokens_details") or _field(usage, "input_tokens_details")
+    output_details = _field(usage, "completion_tokens_details") or _field(usage, "output_tokens_details")
+    return {
+        "api_calls": 1,
+        "input_tokens": input_tokens,
+        "cached_input_tokens": _integer_field(input_details, "cached_tokens"),
+        "cache_write_tokens": _integer_field(input_details, "cache_write_tokens"),
+        "output_tokens": output_tokens,
+        "reasoning_tokens": _integer_field(output_details, "reasoning_tokens"),
+        "total_tokens": total_tokens,
+    }
+
+
+def _empty_usage() -> dict[str, int]:
+    return {
+        "api_calls": 0,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def _field(value: Any, name: str) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _integer_field(value: Any, *names: str) -> int:
+    for name in names:
+        item = _field(value, name)
+        if item is not None:
+            try:
+                return int(item)
+            except (TypeError, ValueError):
+                return 0
+    return 0
 
 
 def _parse_response_json(content: str, *, allow_surrounding_text: bool) -> dict[str, Any]:
@@ -184,7 +251,7 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key in {"backend", "ai_engineer_trj"}:
+    if role.key in {"backend", "ai_engineer_trj", "head_sales"}:
         experiences = merge_duplicate_experiences(experiences)
     candidate = {**candidate, "experiences": experiences}
     payload = {
@@ -202,12 +269,18 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
     }
     if role.evidence_sources is None:
         return payload
-    return {
+    filtered_payload = {
         "LinkedIn Profile ID": candidate.get("linkedin_profile_id", ""),
         "LinkedIn URL": candidate.get("linkedin_url", ""),
         "Candidate Name": candidate.get("candidate_name", ""),
         **custom_evidence_payload(candidate, role.evidence_sources),
     }
+    if role.experience_fields and filtered_payload.get("experiences"):
+        filtered_payload["experiences"] = [
+            {field: experience.get(field) for field in role.experience_fields if field in experience}
+            for experience in filtered_payload["experiences"]
+        ]
+    return filtered_payload
 
 
 def _system_prompt(role: RoleProfile) -> str:
@@ -278,7 +351,13 @@ def _response_schema(role: RoleProfile) -> dict[str, Any]:
 def _grading_properties(role: RoleProfile, columns: list[str]) -> dict[str, Any]:
     properties: dict[str, Any] = {}
     for column in columns:
-        if column in role.category_scores:
+        if column in role.component_score_maxima:
+            properties[column] = {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": role.component_score_maxima[column],
+            }
+        elif column in role.category_scores:
             schema: dict[str, Any] = {
                 "type": "number" if role.numeric_scores else "integer",
                 "minimum": 0,

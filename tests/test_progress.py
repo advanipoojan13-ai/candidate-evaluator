@@ -12,6 +12,7 @@ from candidate_evaluator.progress import (
     mark_failed,
     mark_skipped,
     progress_counts,
+    record_api_usage,
     result_rows,
     role_for_run,
 )
@@ -168,3 +169,47 @@ def test_progress_tracks_skipped_without_exporting_it(tmp_path: Path, monkeypatc
     assert counts["avg_seconds_per_candidate"] == 10
     assert result_rows("run-skip") == [{"Candidate Name": "A"}]
     assert candidate_status_rows("run-skip")[1]["Status"] == "Skipped"
+
+
+def test_progress_accumulates_real_usage_receipts_across_batches(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidates = [
+        {"source_index": index, "linkedin_profile_id": f"candidate-{index}", "source_row": {}}
+        for index in range(10)
+    ]
+    init_run("run-usage", candidates, "rubric", "model")
+
+    record_api_usage(
+        "run-usage",
+        {
+            "api_calls": 1,
+            "input_tokens": 8000,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 2000,
+            "reasoning_tokens": 100,
+            "total_tokens": 10000,
+        },
+    )
+    record_api_usage(
+        "run-usage",
+        {
+            "api_calls": 1,
+            "input_tokens": 7500,
+            "cached_input_tokens": 3000,
+            "cache_write_tokens": 0,
+            "output_tokens": 1900,
+            "reasoning_tokens": 80,
+            "total_tokens": 9400,
+        },
+    )
+
+    assert progress_counts("run-usage")["api_usage"] == {
+        "api_calls": 2,
+        "input_tokens": 15500,
+        "cached_input_tokens": 3000,
+        "cache_write_tokens": 0,
+        "output_tokens": 3900,
+        "reasoning_tokens": 180,
+        "total_tokens": 19400,
+    }

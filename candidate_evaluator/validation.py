@@ -85,6 +85,41 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
     return fixed
 
 
+def apply_calculated_fields(
+    row: dict[str, Any],
+    candidate: dict[str, Any],
+    role_or_key: str | RoleProfile = "design",
+) -> dict[str, Any]:
+    """Add fields that are more reliable and cheaper to calculate in Python."""
+    role = _resolve_role(role_or_key)
+    calculated = dict(row)
+
+    scores = [calculated.get(column) for column in role.category_scores]
+    if all(_is_number(score) for score in scores):
+        total = round(sum(float(score) for score in scores), 10)
+        calculated[role.total_column] = total if role.numeric_scores else int(total)
+        if role.outcome_bands:
+            calculated[role.outcome_column] = expected_outcome(total, role)
+
+    for column in role.grading_columns:
+        if not column.endswith("— Years and Months"):
+            continue
+        months_column = column.removesuffix("Years and Months") + "Months"
+        months = calculated.get(months_column)
+        if _is_number(months) and float(months) >= 0:
+            calculated[column] = _format_years_and_months(int(float(months)))
+
+    experiences = candidate.get("experiences") or []
+    current = next((experience for experience in experiences if experience.get("is_current")), None)
+    current = current or (experiences[0] if experiences else {})
+    if "Current Company" in role.grading_columns:
+        calculated["Current Company"] = current.get("company_name", "")
+    if "Current Title" in role.grading_columns:
+        calculated["Current Title"] = current.get("position_or_title", "")
+
+    return calculated
+
+
 def _resolve_role(role_or_key: str | RoleProfile) -> RoleProfile:
     return role_or_key if isinstance(role_or_key, RoleProfile) else get_role_profile(role_or_key)
 
@@ -113,6 +148,20 @@ def _as_number(value: Any, name: str, errors: list[str], integer_only: bool) -> 
 
 def _numbers_equal(left: float, right: float) -> bool:
     return abs(float(left) - float(right)) < 1e-9
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _format_years_and_months(total_months: int) -> str:
+    years, months = divmod(total_months, 12)
+    parts = []
+    if years:
+        parts.append(f"{years} year" if years == 1 else f"{years} years")
+    if months or not parts:
+        parts.append(f"{months} month" if months == 1 else f"{months} months")
+    return " ".join(parts)
 
 
 def _word_count(text: str) -> int:

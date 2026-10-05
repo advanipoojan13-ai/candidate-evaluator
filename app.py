@@ -52,7 +52,8 @@ from candidate_evaluator.roles import (
     role_options,
     validate_custom_role_config,
 )
-from candidate_evaluator.validation import coerce_fixed_row, validate_output_row
+from candidate_evaluator.validation import apply_calculated_fields, coerce_fixed_row, validate_output_row
+from candidate_evaluator.openai_scoring import BATCH_SIZE
 
 
 DEFAULT_RUBRIC_PATH = "/Users/sehermehta/Documents/Documents - Seher’s MacBook Air/Codex/candidate-evaluator/rubric.md"
@@ -641,21 +642,27 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
             worklist.append(candidate)
 
     rubric_text = (run_dir(run_id) / "rubric.md").read_text(encoding="utf-8")
+    batches = [worklist[index : index + BATCH_SIZE] for index in range(0, len(worklist), BATCH_SIZE)]
     total = max(len(worklist) + skipped_in_pass, 1)
-    max_workers = max(1, min(int(parallel_calls), len(worklist) or 1))
+    max_workers = max(1, min(int(parallel_calls), len(batches) or 1))
     completed_in_pass = skipped_in_pass
-    pending = list(worklist)
-    active: dict[Any, dict[str, Any]] = {}
+    pending = list(batches)
+    active: dict[Any, list[dict[str, Any]]] = {}
     progress.progress(completed_in_pass / total)
+    provider = get_provider(provider_key)
     message.info(
-        f"Running up to {max_workers} candidates at a time. "
+        f"Running up to {max_workers} {provider.label} batch call(s) at a time, "
+        f"with up to {BATCH_SIZE} candidates per call. "
         f"Skipped {skipped_in_pass} unusable profile(s) without an API call."
     )
     _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        while pending and len(active) < max_workers:
-            _submit_candidate(
+        # OpenAI's first batch establishes the shared rubric prefix before
+        # later batches run in parallel. Other providers can start at full concurrency.
+        initial_limit = 1 if provider_key == DEFAULT_PROVIDER_KEY else max_workers
+        while pending and len(active) < initial_limit:
+            _submit_candidate_batch(
                 executor,
                 active,
                 pending,
@@ -672,37 +679,38 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
         while active:
             done, _ = wait(active.keys(), return_when=FIRST_COMPLETED)
             for future in done:
-                candidate = active.pop(future)
-                candidate_id = candidate["linkedin_profile_id"]
-                result = future.result()
-                if result["state"] == "completed":
-                    mark_completed(run_id, candidate_id, result["row"], result["raw"], result["elapsed_seconds"])
-                elif result["state"] == "skipped":
-                    mark_skipped(
-                        run_id,
-                        candidate_id,
-                        result["error"],
-                        raw_response=result.get("raw"),
-                        elapsed_seconds=result["elapsed_seconds"],
-                    )
-                else:
-                    mark_failed(run_id, candidate_id, result["error"], elapsed_seconds=result["elapsed_seconds"])
-                completed_in_pass += 1
-                progress.progress(completed_in_pass / total)
+                candidates_in_batch = active.pop(future)
+                results = future.result()
+                for candidate, result in zip(candidates_in_batch, results):
+                    candidate_id = candidate["linkedin_profile_id"]
+                    if result["state"] == "completed":
+                        mark_completed(run_id, candidate_id, result["row"], result["raw"], result["elapsed_seconds"])
+                    elif result["state"] == "skipped":
+                        mark_skipped(
+                            run_id,
+                            candidate_id,
+                            result["error"],
+                            raw_response=result.get("raw"),
+                            elapsed_seconds=result["elapsed_seconds"],
+                        )
+                    else:
+                        mark_failed(run_id, candidate_id, result["error"], elapsed_seconds=result["elapsed_seconds"])
+                    completed_in_pass += 1
+                    progress.progress(completed_in_pass / total)
 
-                if pending:
-                    _submit_candidate(
-                        executor,
-                        active,
-                        pending,
-                        run_id,
-                        api_key,
-                        provider_key,
-                        model,
-                        reasoning_effort,
-                        rubric_text,
-                        role,
-                    )
+            while pending and len(active) < max_workers:
+                _submit_candidate_batch(
+                    executor,
+                    active,
+                    pending,
+                    run_id,
+                    api_key,
+                    provider_key,
+                    model,
+                    reasoning_effort,
+                    rubric_text,
+                    role,
+                )
 
             _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
@@ -710,10 +718,10 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
     _render_live_status(run_id, dashboard, preview, summary, run_finished=True, parallel_calls=max_workers)
 
 
-def _submit_candidate(
+def _submit_candidate_batch(
     executor: ThreadPoolExecutor,
-    active: dict[Any, dict[str, Any]],
-    pending: list[dict[str, Any]],
+    active: dict[Any, list[dict[str, Any]]],
+    pending: list[list[dict[str, Any]]],
     run_id: str,
     api_key: str,
     provider_key: str,
@@ -722,20 +730,84 @@ def _submit_candidate(
     rubric_text: str,
     role: RoleProfile,
 ) -> None:
-    candidate = pending.pop(0)
-    candidate_id = candidate["linkedin_profile_id"]
-    set_current(run_id, candidate_id)
+    candidates = pending.pop(0)
+    for candidate in candidates:
+        set_current(run_id, candidate["linkedin_profile_id"])
     future = executor.submit(
-        _evaluate_candidate_for_run,
+        _evaluate_candidate_batch_for_run,
         api_key,
         model,
         rubric_text,
-        candidate,
+        candidates,
         role,
         provider_key,
         reasoning_effort,
     )
-    active[future] = candidate
+    active[future] = candidates
+
+
+def _evaluate_candidate_batch_for_run(
+    api_key: str,
+    model: str,
+    rubric_text: str,
+    candidates: list[dict[str, Any]],
+    role: RoleProfile,
+    provider_key: str = DEFAULT_PROVIDER_KEY,
+    reasoning_effort: str = "none",
+) -> list[dict[str, Any]]:
+    import time
+
+    started = time.monotonic()
+    try:
+        from candidate_evaluator.openai_scoring import evaluate_candidates
+
+        evaluations = evaluate_candidates(
+            api_key=api_key,
+            provider_key=provider_key,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            rubric_text=rubric_text,
+            candidates=candidates,
+            role_profile=role,
+        )
+        batch_elapsed = time.monotonic() - started
+        elapsed = batch_elapsed / len(candidates)
+        results = []
+        for candidate, (grading, raw) in zip(candidates, evaluations):
+            role_source = {
+                **candidate["source_row"],
+                "Candidate": candidate.get("candidate_name", ""),
+                "Profile URL": candidate.get("linkedin_url", ""),
+                "Rank Number": "",
+            }
+            row = apply_calculated_fields({**role_source, **grading}, candidate, role)
+            row = coerce_fixed_row(row, role)
+            errors = validate_output_row(row, role)
+            if errors:
+                results.append(
+                    {
+                        "state": "skipped",
+                        "error": "Skipped after API call because the grading output was incomplete or invalid: "
+                        + "; ".join(errors),
+                        "raw": raw,
+                        "elapsed_seconds": elapsed,
+                    }
+                )
+            else:
+                results.append({"state": "completed", "row": row, "raw": raw, "elapsed_seconds": elapsed})
+        return results
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raw_content = getattr(exc, "raw_content", "")
+        result = {
+            "state": "skipped",
+            "error": f"Skipped after API call because the batch output was empty, incomplete, or unreadable: {exc}",
+            "raw": {"unparsed_content": raw_content} if raw_content else {},
+            "elapsed_seconds": time.monotonic() - started,
+        }
+        return [dict(result) for _ in candidates]
+    except Exception as exc:
+        result = {"state": "failed", "error": str(exc), "elapsed_seconds": time.monotonic() - started}
+        return [dict(result) for _ in candidates]
 
 
 def _evaluate_candidate_for_run(
@@ -747,6 +819,7 @@ def _evaluate_candidate_for_run(
     provider_key: str = DEFAULT_PROVIDER_KEY,
     reasoning_effort: str = "none",
 ) -> dict[str, Any]:
+    """Compatibility path for a single candidate and focused unit tests."""
     import time
 
     started = time.monotonic()
@@ -768,13 +841,14 @@ def _evaluate_candidate_for_run(
             "Profile URL": candidate.get("linkedin_url", ""),
             "Rank Number": "",
         }
-        row = {**role_source, **grading}
+        row = apply_calculated_fields({**role_source, **grading}, candidate, role)
         row = coerce_fixed_row(row, role)
         errors = validate_output_row(row, role)
         if errors:
             return {
                 "state": "skipped",
-                "error": "Skipped after API call because the grading output was incomplete or invalid: " + "; ".join(errors),
+                "error": "Skipped after API call because the grading output was incomplete or invalid: "
+                + "; ".join(errors),
                 "raw": raw,
                 "elapsed_seconds": time.monotonic() - started,
             }

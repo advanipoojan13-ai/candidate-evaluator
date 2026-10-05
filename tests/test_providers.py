@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from candidate_evaluator import openai_scoring
-from candidate_evaluator.openai_scoring import ModelOutputFormatError, evaluate_candidate
+from candidate_evaluator.openai_scoring import ModelOutputFormatError, evaluate_candidate, evaluate_candidates
 from candidate_evaluator.providers import (
     DEEPSEEK_PROVIDER_KEY,
     OPENAI_PROVIDER_KEY,
@@ -50,6 +50,10 @@ def _candidate() -> dict:
     }
 
 
+def _batch_response(grading: dict) -> dict:
+    return {"evaluations": [{"candidate_number": 1, "grading": grading}]}
+
+
 def test_provider_registry_exposes_current_deepseek_models() -> None:
     assert provider_options() == {"OpenAI": "openai", "DeepSeek": "deepseek"}
     deepseek = get_provider(DEEPSEEK_PROVIDER_KEY)
@@ -63,7 +67,7 @@ def test_deepseek_uses_responses_json_schema_and_selected_reasoning(monkeypatch)
     clients: list[tuple[dict, _FakeClient]] = []
 
     def fake_openai(**kwargs):
-        client = _FakeClient({"grading": {"Total Score": 0}})
+        client = _FakeClient(_batch_response({"Total Score": 0}))
         clients.append((kwargs, client))
         return client
 
@@ -81,13 +85,13 @@ def test_deepseek_uses_responses_json_schema_and_selected_reasoning(monkeypatch)
 
     client_args, client = clients[0]
     assert grading == {"Total Score": 0}
-    assert client_args == {"api_key": "deepseek-key", "base_url": "https://api.deepseek.com"}
+    assert client_args == {"api_key": "deepseek-key", "max_retries": 0, "base_url": "https://api.deepseek.com"}
     assert client.chat.completions.calls == []
     request = client.responses.calls[0]
     assert request["model"] == "deepseek-flash"
     assert request["reasoning"] == {"effort": "low"}
     assert request["text"]["format"]["type"] == "json_schema"
-    assert request["text"]["format"]["name"] == "candidate_evaluation"
+    assert request["text"]["format"]["name"] == "candidate_evaluation_batch"
     assert request["text"]["format"]["schema"]["additionalProperties"] is False
 
 
@@ -95,7 +99,7 @@ def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:
     clients: list[tuple[dict, _FakeClient]] = []
 
     def fake_openai(**kwargs):
-        client = _FakeClient({"grading": {"Total Score": 0}})
+        client = _FakeClient(_batch_response({"Total Score": 0}))
         clients.append((kwargs, client))
         return client
 
@@ -111,16 +115,44 @@ def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:
     )
 
     client_args, client = clients[0]
-    assert client_args == {"api_key": "openai-key"}
+    assert client_args == {"api_key": "openai-key", "max_retries": 0}
     assert client.responses.calls == []
     request = client.chat.completions.calls[0]
     assert request["response_format"]["type"] == "json_schema"
     assert request["response_format"]["json_schema"]["strict"] is True
 
 
+def test_deepseek_batches_five_candidates_in_one_call(monkeypatch) -> None:
+    batch = {
+        "evaluations": [
+            {"candidate_number": number, "grading": {"Total Score": number}}
+            for number in range(1, 6)
+        ]
+    }
+    client = _FakeClient(batch)
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
+
+    results = evaluate_candidates(
+        api_key="deepseek-key",
+        provider_key=DEEPSEEK_PROVIDER_KEY,
+        model="deepseek-flash",
+        rubric_text="Shared rubric",
+        candidates=[{**_candidate(), "linkedin_profile_id": f"person-{number}"} for number in range(1, 6)],
+        role_profile=get_role_profile("design"),
+        max_retries=0,
+    )
+
+    assert len(results) == 5
+    assert len(client.responses.calls) == 1
+    request = client.responses.calls[0]
+    assert "Shared rubric" in request["instructions"]
+    assert len(json.loads(request["input"])["candidates"]) == 5
+    assert request["text"]["format"]["name"] == "candidate_evaluation_batch"
+
+
 def test_deepseek_accepts_valid_json_with_trailing_text_without_retry(monkeypatch) -> None:
-    valid = json.dumps({"grading": {"Total Score": 42}})
-    client = _FakeClient({"grading": {}})
+    valid = json.dumps(_batch_response({"Total Score": 42}))
+    client = _FakeClient(_batch_response({}))
     client.responses = _FakeEndpoint(SimpleNamespace(output_text=valid + "\nAdditional explanation"))
     monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
 
@@ -135,14 +167,14 @@ def test_deepseek_accepts_valid_json_with_trailing_text_without_retry(monkeypatc
     )
 
     assert grading == {"Total Score": 42}
-    assert raw == {"grading": {"Total Score": 42}}
+    assert raw == {"candidate_number": 1, "grading": {"Total Score": 42}}
     assert len(client.responses.calls) == 1
 
 
 def test_deepseek_uses_first_complete_json_when_another_object_follows(monkeypatch) -> None:
-    first = json.dumps({"grading": {"Total Score": 42}})
-    second = json.dumps({"grading": {"Total Score": 99}})
-    client = _FakeClient({"grading": {}})
+    first = json.dumps(_batch_response({"Total Score": 42}))
+    second = json.dumps(_batch_response({"Total Score": 99}))
+    client = _FakeClient(_batch_response({}))
     client.responses = _FakeEndpoint(SimpleNamespace(output_text=first + second))
     monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
 
@@ -161,8 +193,8 @@ def test_deepseek_uses_first_complete_json_when_another_object_follows(monkeypat
 
 
 def test_deepseek_accepts_json_surrounded_by_markdown_without_retry(monkeypatch) -> None:
-    valid = json.dumps({"grading": {"Total Score": 31}})
-    client = _FakeClient({"grading": {}})
+    valid = json.dumps(_batch_response({"Total Score": 31}))
+    client = _FakeClient(_batch_response({}))
     client.responses = _FakeEndpoint(SimpleNamespace(output_text=f"Result:\n```json\n{valid}\n```"))
     monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
 
@@ -182,11 +214,11 @@ def test_deepseek_accepts_json_surrounded_by_markdown_without_retry(monkeypatch)
 
 def test_malformed_deepseek_response_is_not_retried(monkeypatch) -> None:
     malformed = '{"grading": {"Total Score": 10,}}'
-    client = _FakeClient({"grading": {}})
+    client = _FakeClient(_batch_response({}))
     client.responses = _FakeEndpoint(
         [
             SimpleNamespace(output_text=malformed),
-            SimpleNamespace(output_text=json.dumps({"grading": {"Total Score": 10}})),
+            SimpleNamespace(output_text=json.dumps(_batch_response({"Total Score": 10}))),
         ]
     )
     monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
@@ -208,8 +240,8 @@ def test_malformed_deepseek_response_is_not_retried(monkeypatch) -> None:
 
 
 def test_empty_deepseek_response_is_not_retried(monkeypatch) -> None:
-    valid = json.dumps({"grading": {"Total Score": 0}})
-    client = _FakeClient({"grading": {}})
+    valid = json.dumps(_batch_response({"Total Score": 0}))
+    client = _FakeClient(_batch_response({}))
     client.responses = _FakeEndpoint(
         [
             SimpleNamespace(output_text=""),

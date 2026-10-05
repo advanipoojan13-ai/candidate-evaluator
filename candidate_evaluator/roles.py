@@ -45,6 +45,14 @@ class RoleProfile:
     def output_columns(self) -> list[str]:
         return self.export_columns or (SOURCE_COLUMNS + self.grading_columns)
 
+    @property
+    def model_grading_columns(self) -> list[str]:
+        """Fields requiring judgement rather than deterministic application code."""
+        calculated = {self.total_column, self.outcome_column}
+        calculated.update(column for column in self.grading_columns if column.endswith("— Years and Months"))
+        calculated.update({"Current Company", "Current Title"})
+        return [column for column in self.grading_columns if column not in calculated]
+
 
 DESIGN_GRADING_COLUMNS = [
     "Total Relevant Design Experience — Months",
@@ -256,22 +264,12 @@ ROLE_PROFILES = {
             (0, 19, "Low relevance"),
         ],
         evidence_confidence_values=["High", "Medium", "Low"],
-        system_prompt=(
-            "You are a strict candidate evaluator for senior Product/UX Designer profiles. "
-            "Score only from the supplied candidate fields and the supplied rubric. "
-            "Use all experience entries, not only the first three. "
-            "Use whole-number category scores and obey the supplied category maxima. "
-            "Total Score must equal the sum of category scores and must not exceed 60. "
-            "Ranking bands are: 45-60 Strong relevance, 32-44 Good relevance, "
-            "20-31 Limited relevance, 0-19 Low relevance. "
-            "Strongest Evidence must contain no more than three material evidence points. "
-            "Score Rationale must be 50 to 75 words and no longer than 75 words."
-        ),
+        system_prompt="You are a strict candidate evaluator for senior Product/UX Designer profiles.",
         instructions=[
             "Use every experience entry supplied in candidate.experiences for scoring.",
             "Treat every experience index as a separate role, including multiple roles at the same company.",
-            "Ignore skills, projects, courses, certifications, images, logos, followers, connections, IDs other than LinkedIn Profile ID, extra URLs, and scraper metadata.",
-            "Return only fields required by the JSON schema.",
+            "Ignore global skills, projects, courses, certifications, and extra URLs for scoring.",
+            "Return no more than three material Strongest Evidence points and keep Score Rationale between 50 and 75 words.",
         ],
         internal_role_flag_name="relevant_design_role",
         internal_role_evidence_name="design_evidence_extracted",
@@ -292,23 +290,12 @@ ROLE_PROFILES = {
             (0, 54, "Reject"),
         ],
         evidence_confidence_values=["High", "Medium", "Low"],
-        system_prompt=(
-            "You are a strict candidate evaluator for Senior QA Automation Engineer profiles. "
-            "Score only explicit evidence from the supplied professional experience entries and supplied rubric. "
-            "Use all available experience entries supplied in candidate.experiences. "
-            "Do not use headline, about, skills, education, certifications, projects, courses, recommendations, posts, or external assumptions for QA scoring. "
-            "Use only allowed discrete category scores from the schema. "
-            "Total Score must equal the sum of category scores and must not exceed 100. "
-            "Decision bands are: 70-100 Shortlist, 55-69 Hold, 0-54 Reject. "
-            "Strongest Evidence must contain no more than three material evidence points. "
-            "Score Rationale must be 50 to 75 words and no longer than 75 words."
-        ),
+        system_prompt="You are a strict candidate evaluator for Senior QA Automation Engineer profiles.",
         instructions=[
-            "Use every professional experience entry supplied in candidate.experiences for QA scoring.",
-            "Count an experience only if title or description shows QA, test automation, software testing, SDET, or test engineering work.",
-            "Ignore headline, about, skills, education, certifications, projects, courses, recommendations, posts, currentPosition, and external information for scoring.",
+            "Use every professional experience entry, but count it only when its title or description shows QA, test automation, software testing, SDET, or test engineering work.",
+            "For QA scoring, ignore headline, about, skills, education, certifications, projects, courses, recommendations, posts, and currentPosition.",
             "Score Python and Java separately; do not infer one from the other.",
-            "Return only fields required by the JSON schema.",
+            "Return no more than three material Strongest Evidence points and keep Score Rationale between 50 and 75 words.",
         ],
         internal_role_flag_name="counted_for_qa_scoring",
         internal_role_evidence_name="qa_evidence_extracted",
@@ -325,25 +312,14 @@ ROLE_PROFILES = {
         outcome_column="Rank Number",
         outcome_bands=[],
         evidence_confidence_values=["High", "Medium", "Low"],
-        system_prompt=(
-            "You are a strict LinkedIn evidence evaluator for Senior Backend Engineer profiles. "
-            "Score PHP, Python, Laravel, and AWS independently using only the supplied rubric and permitted candidate fields. "
-            "Use all available experience entries. Do not infer PHP from Laravel, and do not infer Python from Django, Flask, or FastAPI. "
-            "Use the strongest evidence source without stacking evidence points. Apply recency and duration independently per technology, "
-            "including the rubric's Tier A, B, and C duration caps and non-overlapping duration rules. "
-            "Technology scores and Final Score may contain one decimal place. Final Score must equal the four technology scores and must not exceed 60. "
-            "Warnings do not change the score. Use 'Unverified' neutrally when evidence is absent. "
-            "Return no more than three strongest evidence points in the single Strongest Evidence field, separated by ' | '. "
-            "Score Rationale must contain 50 to 75 words."
-        ),
+        system_prompt="You are a strict LinkedIn evidence evaluator for Senior Backend Engineer profiles.",
         instructions=[
-            "Use Headline, About, experience title, description, dates, duration, and experience-level skills only as permitted by the rubric.",
-            "Do not use global skills, education, certifications, projects, courses, recommendations, followers, connections, or external information.",
-            "Treat duplicate experience records as one record for evidence and duration; otherwise evaluate every experience entry.",
-            "Current Company and Current Title are identification fields only and do not earn points.",
+            "Score PHP, Python, Laravel, and AWS independently using the rubric's permitted evidence fields; do not infer PHP from Laravel or Python from Django, Flask, or FastAPI.",
+            "Evaluate every supplied experience entry after duplicate records have been merged, use the strongest evidence source without stacking, and apply the rubric's recency, duration-cap, and non-overlap rules.",
             "For year-only dates, use 6 months when start and end year match; otherwise use 12 x (end year - start year - 1) + 8 months.",
-            "Calculate each hidden weighted subtotal by multiplying the PHP, Python, Laravel, and AWS raw component by 2.0, 2.0, 1.2, and 0.8 respectively, then summing. Return the recency, duration, and evidence subtotals for ranking tie-breaks only; do not add them to Final Score again.",
-            "Return only fields required by the JSON schema.",
+            "Calculate the recency, duration, and evidence subtotals using the rubric's PHP, Python, Laravel, and AWS weights of 2.0, 2.0, 1.2, and 0.8; return them for ranking tie-breaks only.",
+            "Warnings do not change the score, and absent evidence must be described neutrally as Unverified.",
+            "Return no more than three material Strongest Evidence points separated by ' | ' and keep Score Rationale between 50 and 75 words.",
         ],
         internal_role_flag_name="relevant_backend_role",
         internal_role_evidence_name="backend_evidence_extracted",
@@ -375,17 +351,10 @@ ROLE_PROFILES = {
         outcome_column="Rank Number",
         outcome_bands=[],
         evidence_confidence_values=["High", "Medium", "Low"],
-        system_prompt=(
-            "You are a strict LinkedIn evidence evaluator for Senior AI & Automation Engineer profiles. "
-            "Score AI/LLM/agentic systems, Python, API/system integration, workflow automation, TypeScript/Node.js, "
-            "and ownership/production maturity independently using only the supplied rubric and permitted candidate fields. "
-            "For each capability, calculate raw Evidence, Recency, and Evidenced Duration components, then apply the rubric multiplier. "
-            "Use the strongest evidence source without stacking evidence points, use only non-overlapping supported duration, and do not infer "
-            "one capability from another. Scores and Final Score may contain one decimal place. Final Score must equal the six capability scores "
-            "and must not exceed 100. Warnings do not change the score. Describe missing evidence neutrally as unverified. "
-            "Score Rationale must contain 50 to 75 words."
-        ),
+        system_prompt="You are a strict LinkedIn evidence evaluator for Senior AI & Automation Engineer profiles.",
         instructions=[
+            "Score AI/LLM/agentic systems, Python, API/system integration, workflow automation, TypeScript/Node.js, and ownership/production maturity independently.",
+            "For each capability, calculate raw Evidence, Recency, and Evidenced Duration components, then apply the rubric multiplier; use the strongest source without stacking, count only non-overlapping supported duration, and do not infer one capability from another.",
             "Use only Headline, About, experience title, experience description, experience-level skills or technologies, experience dates or duration, and Projects for scoring.",
             "Use name, profile URL, current company or title, location, and employment type only for identification; they earn no points.",
             "Do not score global skills, top skills, education, certifications, courses, recommendations, endorsements, followers, connections, languages, volunteering, company reputation, industry, recruiter-search match, LinkedIn-inferred skills, or outside knowledge.",
@@ -394,7 +363,7 @@ ROLE_PROFILES = {
             "Using ChatGPT, Copilot, or Claude as a productivity tool is not AI/LLM capability evidence. POCs and prototypes do not by themselves prove production maturity.",
             "Workflow Automation means identifiable business or operational workflows. Do not count QA/test automation, CI/CD, infrastructure automation, browser testing, or industrial/manufacturing automation.",
             "Plain JavaScript and frontend-only work do not by themselves qualify for TypeScript / Node.js scoring.",
-            "Return only fields required by the JSON schema. Rank Number is calculated after all candidates are scored and must not be returned.",
+            "Warnings do not change the score, and missing evidence must be described neutrally as unverified.",
         ],
         internal_role_flag_name="relevant_ai_automation_role",
         internal_role_evidence_name="ai_automation_evidence_extracted",
@@ -613,7 +582,6 @@ def build_custom_role_profile(config: dict[str, Any]) -> RoleProfile:
     )
     role_name = str(config["role_name"]).strip()
     evidence_sources = list(config["evidence_sources"])
-    band_text = ", ".join(f"{low}-{high} {label}" for low, high, label in bands)
     source_text = ", ".join(evidence_sources)
     grading_columns = [
         *category_scores,
@@ -633,21 +601,13 @@ def build_custom_role_profile(config: dict[str, Any]) -> RoleProfile:
         outcome_column=outcome_column,
         outcome_bands=bands,
         evidence_confidence_values=["High", "Medium", "Low"],
-        system_prompt=(
-            f"You are a strict candidate evaluator for {role_name} profiles. "
-            "Score only from the supplied rubric and the explicitly permitted candidate evidence fields. "
-            f"Permitted evidence sources are: {source_text}. Ignore every other candidate field for scoring. "
-            "Use whole-number category scores and do not infer unstated skills, responsibilities, seniority, or results. "
-            f"Total Score must equal the category score sum and must not exceed {sum(category_scores.values())}. "
-            f"{outcome_column} bands are: {band_text}. "
-            "Return at most three strongest evidence points and keep Score Rationale to 75 words or fewer."
-        ),
+        system_prompt=f"You are a strict candidate evaluator for {role_name} profiles.",
         instructions=[
-            "Apply the uploaded rubric exactly and score every configured category independently.",
             f"Use only these evidence sources: {source_text}.",
             "Use every supplied experience entry when experience is a permitted source.",
-            "Use zero when required evidence is absent; do not invent or infer missing facts.",
-            "Return only fields required by the JSON schema.",
+            "Score every configured category independently using whole-number category scores.",
+            "Use zero when required evidence is absent.",
+            "Return no more than three material Strongest Evidence points and keep Score Rationale to 75 words or fewer.",
         ],
         internal_role_flag_name="relevant_custom_role",
         internal_role_evidence_name="custom_role_evidence_extracted",

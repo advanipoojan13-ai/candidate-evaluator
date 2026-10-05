@@ -13,6 +13,18 @@ from .evidence import (
 
 
 @dataclass(frozen=True)
+class ComponentScoreRule:
+    evidence_column: str
+    impact_column: str
+    duration_column: str
+    multiplier: float
+
+    @property
+    def columns(self) -> tuple[str, str, str]:
+        return (self.evidence_column, self.impact_column, self.duration_column)
+
+
+@dataclass(frozen=True)
 class RoleProfile:
     key: str
     label: str
@@ -40,6 +52,8 @@ class RoleProfile:
     evidence_sources: Optional[list[str]] = None
     require_experience: bool = False
     skip_if_no_evidence: bool = True
+    component_scoring: Optional[OrderedDict[str, ComponentScoreRule]] = None
+    experience_fields: Optional[list[str]] = None
 
     @property
     def output_columns(self) -> list[str]:
@@ -51,7 +65,17 @@ class RoleProfile:
         calculated = {self.total_column, self.outcome_column}
         calculated.update(column for column in self.grading_columns if column.endswith("— Years and Months"))
         calculated.update({"Current Company", "Current Title"})
+        calculated.update((self.component_scoring or {}).keys())
         return [column for column in self.grading_columns if column not in calculated]
+
+    @property
+    def component_score_maxima(self) -> dict[str, int]:
+        maxima: dict[str, int] = {}
+        for rule in (self.component_scoring or {}).values():
+            maxima[rule.evidence_column] = 4
+            maxima[rule.impact_column] = 4
+            maxima[rule.duration_column] = 2
+        return maxima
 
 
 DESIGN_GRADING_COLUMNS = [
@@ -246,6 +270,75 @@ AI_ENGINEER_TRJ_WARNING_ENUMS = {
 }
 
 
+HEAD_SALES_CAPABILITIES = [
+    ("Dealer / Distributor Network Building", 15, 1.5),
+    ("Revenue Responsibility & Growth", 12, 1.2),
+    ("Geographic / Channel Expansion", 9, 0.9),
+    ("Sales Organisation Building & Leadership", 9, 0.9),
+    ("P&L & Commercial Ownership", 9, 0.9),
+    ("Sales Strategy & Operating Systems", 6, 0.6),
+]
+
+HEAD_SALES_CATEGORY_SCORES = OrderedDict(
+    (f"{name} Score (/{maximum})", maximum) for name, maximum, _ in HEAD_SALES_CAPABILITIES
+)
+
+HEAD_SALES_COMPONENT_SCORING = OrderedDict(
+    (
+        f"{name} Score (/{maximum})",
+        ComponentScoreRule(
+            evidence_column=f"{name} — Evidence Points",
+            impact_column=f"{name} — Impact Points",
+            duration_column=f"{name} — Evidenced Duration Points",
+            multiplier=multiplier,
+        ),
+    )
+    for name, maximum, multiplier in HEAD_SALES_CAPABILITIES
+)
+
+HEAD_SALES_COMPONENT_COLUMNS = [
+    column
+    for rule in HEAD_SALES_COMPONENT_SCORING.values()
+    for column in rule.columns
+]
+
+HEAD_SALES_GRADING_COLUMNS = [
+    "Current Company",
+    "Current Title",
+    *HEAD_SALES_CATEGORY_SCORES,
+    "Final Score (/60)",
+    "Dealer / Distributor Building Unverified",
+    "Revenue Ownership Unverified",
+    "Date-Quality Warning",
+    "Strongest Evidence",
+    "Missing or Unclear Information",
+    "Score Rationale",
+    *HEAD_SALES_COMPONENT_COLUMNS,
+]
+
+HEAD_SALES_OUTPUT_COLUMNS = [
+    "Rank Number",
+    "Candidate",
+    "Profile URL",
+    "Current Company",
+    "Current Title",
+    *HEAD_SALES_CATEGORY_SCORES,
+    "Final Score (/60)",
+    "Dealer / Distributor Building Unverified",
+    "Revenue Ownership Unverified",
+    "Date-Quality Warning",
+    "Strongest Evidence",
+    "Missing or Unclear Information",
+    "Score Rationale",
+]
+
+HEAD_SALES_WARNING_ENUMS = {
+    "Dealer / Distributor Building Unverified": ["Yes", "No"],
+    "Revenue Ownership Unverified": ["Yes", "No"],
+    "Date-Quality Warning": ["Yes", "No"],
+}
+
+
 ROLE_PROFILES = {
     "design": RoleProfile(
         key="design",
@@ -388,6 +481,56 @@ ROLE_PROFILES = {
         rationale_max_words=0,
         evidence_sources=["Location", "Headline", "About", "All experiences", "Projects"],
         skip_if_no_evidence=False,
+    ),
+    "head_sales": RoleProfile(
+        key="head_sales",
+        label="Head Sales",
+        role_name="Head - Sales Strategy & Business Growth",
+        grading_columns=HEAD_SALES_GRADING_COLUMNS,
+        category_scores=HEAD_SALES_CATEGORY_SCORES,
+        allowed_scores={},
+        total_column="Final Score (/60)",
+        total_max=60,
+        outcome_column="Rank Number",
+        outcome_bands=[],
+        evidence_confidence_values=["High", "Medium", "Low"],
+        system_prompt="You are a strict LinkedIn evidence evaluator for Head - Sales Strategy & Business Growth profiles.",
+        instructions=[
+            "Return Evidence, Impact, and Evidenced Duration component points for all six capabilities; Python calculates every weighted capability score, the final score, and rank.",
+            "Warnings do not change the score, and missing evidence must be described neutrally as unverified or not stated.",
+            "Return no more than three material Strongest Evidence points separated by ' | ' and keep Score Rationale to 50 words or fewer.",
+        ],
+        internal_role_flag_name="relevant_head_sales_role",
+        internal_role_evidence_name="head_sales_evidence_extracted",
+        export_columns=HEAD_SALES_OUTPUT_COLUMNS,
+        numeric_scores=True,
+        ranked=True,
+        column_enums=HEAD_SALES_WARNING_ENUMS,
+        ranking_tiebreaker_columns=[
+            "Dealer / Distributor Network Building Score (/15)",
+            "Revenue Responsibility & Growth Score (/12)",
+            "Geographic / Channel Expansion Score (/9)",
+            "P&L & Commercial Ownership Score (/9)",
+            "Sales Organisation Building & Leadership Score (/9)",
+            "Sales Strategy & Operating Systems Score (/6)",
+        ],
+        strongest_evidence_columns=["Strongest Evidence"],
+        rationale_min_words=0,
+        rationale_max_words=50,
+        evidence_sources=["Location", "Headline", "About", "All experiences"],
+        require_experience=False,
+        skip_if_no_evidence=False,
+        component_scoring=HEAD_SALES_COMPONENT_SCORING,
+        experience_fields=[
+            "index",
+            "company_name",
+            "position_or_title",
+            "description",
+            "start_date",
+            "end_date",
+            "is_current",
+            "duration",
+        ],
     ),
 }
 

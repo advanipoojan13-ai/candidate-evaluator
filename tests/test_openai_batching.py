@@ -38,7 +38,14 @@ def _response(count: int) -> SimpleNamespace:
         for number in range(1, count + 1)
     ]
     message = SimpleNamespace(content=json.dumps({"evaluations": evaluations}))
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    usage = SimpleNamespace(
+        prompt_tokens=1200,
+        completion_tokens=300,
+        total_tokens=1500,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=800, cache_write_tokens=0),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=25),
+    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
 @patch("candidate_evaluator.openai_scoring.OpenAI")
@@ -55,6 +62,15 @@ def test_five_candidates_use_one_api_call_and_keep_rubric_in_fixed_prefix(mock_o
     )
 
     assert len(results) == BATCH_SIZE
+    assert results.usage == {
+        "api_calls": 1,
+        "input_tokens": 1200,
+        "cached_input_tokens": 800,
+        "cache_write_tokens": 0,
+        "output_tokens": 300,
+        "reasoning_tokens": 25,
+        "total_tokens": 1500,
+    }
     mock_openai.assert_called_once_with(api_key="test-key", max_retries=OPENAI_MAX_RETRIES)
     create.assert_called_once()
     request = create.call_args.kwargs
@@ -219,6 +235,21 @@ def test_more_than_five_candidates_must_be_split_before_api_call() -> None:
             },
         ),
         ("backend", {"Current Company", "Current Title", "Final Score (/60)", "Rank Number"}),
+        (
+            "head_sales",
+            {
+                "Current Company",
+                "Current Title",
+                "Dealer / Distributor Network Building Score (/15)",
+                "Revenue Responsibility & Growth Score (/12)",
+                "Geographic / Channel Expansion Score (/9)",
+                "Sales Organisation Building & Leadership Score (/9)",
+                "P&L & Commercial Ownership Score (/9)",
+                "Sales Strategy & Operating Systems Score (/6)",
+                "Final Score (/60)",
+                "Rank Number",
+            },
+        ),
     ],
 )
 def test_mechanical_fields_are_not_requested_from_model(role_key, calculated_fields) -> None:

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import random
-import time
 from datetime import date
 from typing import Any, Optional
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
+from openai import OpenAI
 
 from .evidence import custom_evidence_payload
 from .extractor import merge_duplicate_experiences
 from .providers import DEEPSEEK_PROVIDER_KEY, DEFAULT_PROVIDER_KEY, ProviderProfile, get_provider
 from .roles import RoleProfile, get_role_profile
+
+BATCH_SIZE = 5
+OPENAI_MAX_RETRIES = 2
 
 
 def evaluate_candidate(
@@ -24,44 +26,72 @@ def evaluate_candidate(
     role_profile: Optional[RoleProfile] = None,
     provider_key: str = DEFAULT_PROVIDER_KEY,
     reasoning_effort: str = "none",
-    max_retries: int = 5,
-    max_format_retries: int = 2,
+    max_retries: int = OPENAI_MAX_RETRIES,
+    max_format_retries: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    # Kept for compatibility with older callers. Formatting failures are not
+    # retried because that would resend the full rubric and candidate payload.
+    del max_format_retries
+    results = evaluate_candidates(
+        api_key=api_key,
+        model=model,
+        rubric_text=rubric_text,
+        candidates=[candidate],
+        role_key=role_key,
+        role_profile=role_profile,
+        provider_key=provider_key,
+        reasoning_effort=reasoning_effort,
+        max_retries=max_retries,
+    )
+    return results[0]
+
+
+def evaluate_candidates(
+    *,
+    api_key: str,
+    model: str,
+    rubric_text: str,
+    candidates: list[dict[str, Any]],
+    role_key: str = "design",
+    role_profile: Optional[RoleProfile] = None,
+    provider_key: str = DEFAULT_PROVIDER_KEY,
+    reasoning_effort: str = "none",
+    max_retries: int = OPENAI_MAX_RETRIES,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    if not 1 <= len(candidates) <= BATCH_SIZE:
+        raise ValueError(f"An evaluation batch must contain between 1 and {BATCH_SIZE} candidates.")
+
     provider = get_provider(provider_key)
-    client_kwargs: dict[str, Any] = {"api_key": api_key}
+    client_kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": max_retries}
     if provider.base_url:
         client_kwargs["base_url"] = provider.base_url
     client = OpenAI(**client_kwargs)
     role = role_profile or get_role_profile(role_key)
-    # DeepSeek format failures must not trigger another paid evaluation. Its
-    # Responses API can return a complete JSON object with extra surrounding
-    # text, so recover that object locally instead. Keep the existing format
-    # retry behaviour for other providers.
-    format_attempts = 1 if provider.key == DEEPSEEK_PROVIDER_KEY else max_format_retries + 1
-    for format_attempt in range(format_attempts):
-        response = _call_with_backoff(
-            client,
-            provider,
-            model,
-            rubric_text,
-            candidate,
-            role,
-            reasoning_effort=reasoning_effort,
-            max_retries=max_retries,
-        )
-        content = ""
-        try:
-            content = _response_content(response, provider)
-            raw = _parse_response_json(content, allow_surrounding_text=provider.key == DEEPSEEK_PROVIDER_KEY)
-            grading = raw["grading"]
+    response = _create_response(client, provider, model, rubric_text, candidates, role, reasoning_effort)
+
+    content = ""
+    try:
+        content = _response_content(response, provider)
+        raw = _parse_response_json(content, allow_surrounding_text=provider.key == DEEPSEEK_PROVIDER_KEY)
+        evaluations = raw["evaluations"]
+        if not isinstance(evaluations, list):
+            raise TypeError("The evaluations field is not a JSON array.")
+        expected_numbers = list(range(1, len(candidates) + 1))
+        actual_numbers = [item.get("candidate_number") for item in evaluations]
+        if len(evaluations) != len(candidates) or actual_numbers != expected_numbers:
+            raise ValueError(
+                f"{provider.label} returned a different number or order of candidate evaluations "
+                f"(expected {expected_numbers}, received {actual_numbers})."
+            )
+        results = []
+        for item in evaluations:
+            grading = item.get("grading")
             if not isinstance(grading, dict):
-                raise ValueError("The grading field is not a JSON object.")
-            return grading, raw
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            if format_attempt >= format_attempts - 1:
-                raise ModelOutputFormatError(str(exc), content) from exc
-            time.sleep(0.5 * (format_attempt + 1))
-    raise RuntimeError(f"{provider.label} returned unreadable output after retries.")
+                raise TypeError("An evaluation grading field is not a JSON object.")
+            results.append((grading, item))
+        return results
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ModelOutputFormatError(str(exc), content) from exc
 
 
 class ModelOutputFormatError(ValueError):
@@ -76,9 +106,6 @@ def _parse_response_json(content: str, *, allow_surrounding_text: bool) -> dict[
     if not allow_surrounding_text:
         parsed = json.loads(content)
     else:
-        # raw_decode parses one complete JSON value and intentionally leaves any
-        # trailing provider commentary untouched. Finding the first opening brace
-        # also handles prose or a Markdown code fence before the JSON object.
         stripped = content.lstrip()
         object_start = stripped.find("{")
         if object_start < 0:
@@ -89,56 +116,40 @@ def _parse_response_json(content: str, *, allow_surrounding_text: bool) -> dict[
     return parsed
 
 
-def _call_with_backoff(
-    client: OpenAI,
-    provider: ProviderProfile,
-    model: str,
-    rubric_text: str,
-    candidate: dict[str, Any],
-    role: RoleProfile,
-    reasoning_effort: str,
-    max_retries: int,
-) -> Any:
-    for attempt in range(max_retries + 1):
-        try:
-            return _create_response(client, provider, model, rubric_text, candidate, role, reasoning_effort)
-        except (RateLimitError, APIConnectionError, APITimeoutError, APIStatusError) as exc:
-            if attempt >= max_retries or not _is_retryable(exc):
-                raise
-            time.sleep(_retry_delay_seconds(exc, attempt))
-    raise RuntimeError(f"{provider.label} request failed after retries.")
-
-
 def _create_response(
     client: OpenAI,
     provider: ProviderProfile,
     model: str,
     rubric_text: str,
-    candidate: dict[str, Any],
+    candidates: list[dict[str, Any]],
     role: RoleProfile,
     reasoning_effort: str,
 ) -> Any:
+    fixed_prompt = _fixed_prompt(role, rubric_text)
     request_input = json.dumps(
         {
-            "rubric": rubric_text,
-            "candidate": _candidate_payload(candidate, role),
-            "instructions": role.instructions,
-            "output_requirement": "Return JSON that exactly matches the supplied candidate evaluation schema.",
+            "candidates": [
+                {
+                    "candidate_number": index,
+                    "candidate": _candidate_payload(candidate, role),
+                }
+                for index, candidate in enumerate(candidates, start=1)
+            ]
         },
         ensure_ascii=False,
     )
-    schema = _response_schema(role)
+    schema = _batch_response_schema(role)
     if provider.transport == "responses":
         return client.responses.create(
             model=model,
-            instructions=_system_prompt(role),
+            instructions=fixed_prompt,
             input=request_input,
             reasoning={"effort": reasoning_effort or provider.default_reasoning_effort},
             max_output_tokens=16000,
             text={
                 "format": {
                     "type": "json_schema",
-                    "name": "candidate_evaluation",
+                    "name": "candidate_evaluation_batch",
                     "schema": schema,
                 }
             },
@@ -146,17 +157,18 @@ def _create_response(
     return client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": _system_prompt(role)},
+            {"role": "system", "content": fixed_prompt},
             {"role": "user", "content": request_input},
         ],
         response_format={
             "type": "json_schema",
             "json_schema": {
-                "name": "candidate_evaluation",
+                "name": "candidate_evaluation_batch",
                 "strict": True,
                 "schema": schema,
             },
         },
+        prompt_cache_key=_prompt_cache_key(model, fixed_prompt),
     )
 
 
@@ -168,34 +180,6 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
     if not content.strip():
         raise ValueError(f"{provider.label} returned an empty response.")
     return content
-
-
-def _is_retryable(exc: Exception) -> bool:
-    if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
-        return True
-    if isinstance(exc, APIStatusError):
-        return exc.status_code >= 500 or exc.status_code == 429
-    return False
-
-
-def _retry_delay_seconds(exc: Exception, attempt: int) -> float:
-    retry_after = _retry_after_seconds(exc)
-    if retry_after is not None:
-        return min(retry_after, 60.0)
-    base_delay = min(2**attempt, 30)
-    return base_delay + random.uniform(0, 0.75)
-
-
-def _retry_after_seconds(exc: Exception) -> Optional[float]:
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if not headers:
-        return None
-    value = headers.get("retry-after") or headers.get("Retry-After")
-    try:
-        return float(value) if value is not None else None
-    except ValueError:
-        return None
 
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
@@ -211,7 +195,9 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
         "About": candidate.get("about", ""),
         "Website": candidate.get("website", ""),
         "Education 0": (candidate.get("education") or [""])[0] if candidate.get("education") else "",
-        "Education 1": (candidate.get("education") or ["", ""])[1] if len(candidate.get("education") or []) > 1 else "",
+        "Education 1": (candidate.get("education") or ["", ""])[1]
+        if len(candidate.get("education") or []) > 1
+        else "",
         "experiences": experiences,
     }
     if role.evidence_sources is None:
@@ -225,90 +211,73 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
 
 
 def _system_prompt(role: RoleProfile) -> str:
-    maxima_text = ", ".join(f"{name}: {maximum}" for name, maximum in role.category_scores.items())
-    allowed_text = "; ".join(f"{name}: {sorted(values)}" for name, values in role.allowed_scores.items())
-    prompt = f"{role.system_prompt} Evaluation date: {date.today().isoformat()}. Category maxima: {maxima_text}."
-    if allowed_text:
-        prompt += f" Allowed discrete score values: {allowed_text}."
-    return prompt
+    return f"{role.system_prompt} Evaluation date: {date.today().isoformat()}."
 
 
-def _response_schema(role: RoleProfile) -> dict[str, Any]:
-    grading_props = _grading_properties(role)
+def _fixed_prompt(role: RoleProfile, rubric_text: str) -> str:
+    role_instructions = "\n".join(f"- {instruction}" for instruction in role.instructions)
+    prompt = (
+        f"{_system_prompt(role)}\n\n"
+        "UNIVERSAL EVALUATION RULES\n"
+        "- Apply the supplied rubric using only the supplied candidate evidence; do not use external information or invent missing facts.\n"
+        "- Ignore profile-platform metadata such as images, logos, followers, connections, internal IDs, and scraper metadata if present.\n"
+        "- Evaluate every candidate independently; do not compare candidates with one another.\n"
+        "- Return exactly one evaluation per candidate, in the supplied order, using consecutive candidate_number values starting at 1.\n"
+        "- Return only fields required by the JSON schema."
+    )
+    if role_instructions:
+        prompt += f"\n\nROLE-SPECIFIC SAFEGUARDS\n{role_instructions}"
+    return f"{prompt}\n\nRUBRIC\n{rubric_text}"
+
+
+def _prompt_cache_key(model: str, fixed_prompt: str) -> str:
+    digest = hashlib.sha256(f"{model}\0{fixed_prompt}".encode("utf-8")).hexdigest()[:32]
+    return f"candidate-evaluator-{digest}"
+
+
+def _batch_response_schema(role: RoleProfile) -> dict[str, Any]:
+    candidate_schema = _response_schema(role)
+    candidate_schema["required"] = ["candidate_number", *candidate_schema["required"]]
+    candidate_schema["properties"] = {
+        "candidate_number": {"type": "integer", "minimum": 1, "maximum": BATCH_SIZE},
+        **candidate_schema["properties"],
+    }
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["grading", "internal_role_summaries", "internal_category_justifications"],
+        "required": ["evaluations"],
         "properties": {
-            "grading": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": role.grading_columns,
-                "properties": grading_props,
-            },
-            "internal_role_summaries": {
+            "evaluations": {
                 "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "experience_index",
-                        "company",
-                        "title",
-                        "employment_type",
-                        "actual_duration_months",
-                        "employment_type_weight",
-                        "weighted_duration_months",
-                        role.internal_role_flag_name,
-                        "reason",
-                        role.internal_role_evidence_name,
-                    ],
-                    "properties": {
-                        "experience_index": {"type": "integer"},
-                        "company": {"type": "string"},
-                        "title": {"type": "string"},
-                        "employment_type": {"type": "string"},
-                        "actual_duration_months": {"type": "number"},
-                        "employment_type_weight": {"type": "number"},
-                        "weighted_duration_months": {"type": "number"},
-                        role.internal_role_flag_name: {"type": "boolean"},
-                        "reason": {"type": "string"},
-                        role.internal_role_evidence_name: {"type": "string"},
-                    },
-                },
-            },
-            "internal_category_justifications": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "category",
-                        "assigned_score",
-                        "evidence_used",
-                        "relevant_experience_indexes",
-                        "applicable_score_band",
-                        "score_cap_applied",
-                        "brief_justification",
-                    ],
-                    "properties": {
-                        "category": {"type": "string"},
-                        "assigned_score": {"type": "number" if role.numeric_scores else "integer"},
-                        "evidence_used": {"type": "string"},
-                        "relevant_experience_indexes": {"type": "array", "items": {"type": "integer"}},
-                        "applicable_score_band": {"type": "string"},
-                        "score_cap_applied": {"type": "string"},
-                        "brief_justification": {"type": "string"},
-                    },
-                },
-            },
+                "minItems": 1,
+                "maxItems": BATCH_SIZE,
+                "items": candidate_schema,
+            }
         },
     }
 
 
-def _grading_properties(role: RoleProfile) -> dict[str, Any]:
+def _response_schema(role: RoleProfile) -> dict[str, Any]:
+    model_columns = role.model_grading_columns
+    grading_props = _grading_properties(role, model_columns)
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["grading"],
+        "properties": {
+            "grading": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": model_columns,
+                "properties": grading_props,
+            }
+        },
+    }
+
+
+def _grading_properties(role: RoleProfile, columns: list[str]) -> dict[str, Any]:
     properties: dict[str, Any] = {}
-    for column in role.grading_columns:
+    for column in columns:
         if column in role.category_scores:
             schema: dict[str, Any] = {
                 "type": "number" if role.numeric_scores else "integer",

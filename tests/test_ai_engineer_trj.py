@@ -112,7 +112,7 @@ def test_ai_engineer_full_evaluation_flow_accepts_any_rationale_length(monkeypat
     assert result["state"] == "completed"
 
 
-def test_ai_engineer_full_evaluation_flow_still_skips_invalid_scores(monkeypatch) -> None:
+def test_ai_engineer_full_evaluation_flow_recalculates_incorrect_total(monkeypatch) -> None:
     grading = _valid_ai_row()
     grading["Final Score (/100)"] = 79
 
@@ -135,8 +135,8 @@ def test_ai_engineer_full_evaluation_flow_still_skips_invalid_scores(monkeypatch
         get_role_profile("ai_engineer_trj"),
     )
 
-    assert result["state"] == "skipped"
-    assert "must equal category score sum" in result["error"]
+    assert result["state"] == "completed"
+    assert result["row"]["Final Score (/100)"] == 78
 
 
 def test_ai_engineer_unreadable_output_is_skipped_and_preserved(monkeypatch) -> None:
@@ -313,7 +313,8 @@ def test_ai_engineer_schema_and_bundled_rubric_exclude_rank_from_model_response(
     schema = _response_schema(role)
     grading = schema["properties"]["grading"]
     assert "Rank Number" not in grading["required"]
-    assert grading["properties"]["Final Score (/100)"]["type"] == "number"
+    assert "Final Score (/100)" not in grading["required"]
+    assert "Final Score (/100)" not in grading["properties"]
 
     rubric_path = Path(_default_rubric_path("ai_engineer_trj"))
     assert rubric_path.name == "ai_engineer_trj.md"

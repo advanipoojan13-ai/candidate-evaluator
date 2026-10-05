@@ -13,7 +13,7 @@ from candidate_evaluator.extractor import (
     preview_candidates,
 )
 from candidate_evaluator.roles import get_role_profile, prepare_output_rows
-from candidate_evaluator.validation import expected_outcome, validate_output_row
+from candidate_evaluator.validation import apply_calculated_fields, expected_outcome, validate_output_row
 
 
 SAMPLE_PATH = Path("/Users/sehermehta/Documents/Documents - Seher’s MacBook Air/Codex/candidate-evaluator/sample.json")
@@ -212,6 +212,67 @@ def test_backend_output_ranking_uses_documented_tie_break_order() -> None:
     ranked = prepare_output_rows(rows, "backend")
     assert [row["Candidate"] for row in ranked] == ["Alpha", "Beta"]
     assert [row["Rank Number"] for row in ranked] == [1, 2]
+
+
+def test_python_calculates_design_total_band_and_duration_labels() -> None:
+    role = get_role_profile("design")
+    row = {
+        **{column: 0 for column in role.category_scores},
+        "UX/Product Design Experience and Career Depth — Score": 15,
+        "User Research, Insight and Synthesis — Score": 12,
+        "UX Craft and Complex Workflow Design — Score": 10,
+        "Product Thinking, UX Strategy and Ownership — Score": 8,
+        "Total Relevant Design Experience — Months": 25,
+        "Total Weighted Relevant Design Experience — Months": 12,
+        "Weighted Design-Agency Experience — Months": 0,
+    }
+
+    calculated = apply_calculated_fields(row, {"experiences": []}, role)
+
+    assert calculated["Total Score"] == 45
+    assert calculated["Ranking"] == "Strong relevance"
+    assert calculated["Total Relevant Design Experience — Years and Months"] == "2 years 1 month"
+    assert calculated["Total Weighted Relevant Design Experience — Years and Months"] == "1 year"
+    assert calculated["Weighted Design-Agency Experience — Years and Months"] == "0 months"
+
+
+def test_python_calculates_qa_decision_boundaries() -> None:
+    role = get_role_profile("qa")
+    row = {column: 0 for column in role.category_scores}
+    row.update(
+        {
+            "Rest Assured / API Automation — Score": 35,
+            "Manual API / Postman — Score": 15,
+            "Python Automation — Score": 5,
+        }
+    )
+
+    calculated = apply_calculated_fields(row, {"experiences": []}, role)
+
+    assert calculated["Total Score"] == 55
+    assert calculated["Decision"] == "Hold"
+
+
+def test_python_calculates_backend_total_and_current_role() -> None:
+    role = get_role_profile("backend")
+    row = {
+        "PHP Score (/20)": 15.0,
+        "Python Score (/20)": 13.0,
+        "Laravel Score (/12)": 6.6,
+        "AWS Score (/8)": 4.4,
+    }
+    candidate = {
+        "experiences": [
+            {"company_name": "Previous Ltd", "position_or_title": "Backend Engineer", "is_current": False},
+            {"company_name": "Example Ltd", "position_or_title": "Senior Backend Engineer", "is_current": True},
+        ]
+    }
+
+    calculated = apply_calculated_fields(row, candidate, role)
+
+    assert calculated["Final Score (/60)"] == 39.0
+    assert calculated["Current Company"] == "Example Ltd"
+    assert calculated["Current Title"] == "Senior Backend Engineer"
 
 
 def test_backend_duplicate_merge_preserves_distinct_roles() -> None:

@@ -90,13 +90,24 @@ def test_deepseek_uses_responses_json_schema_and_selected_reasoning(monkeypatch)
     request = client.responses.calls[0]
     assert request["model"] == "deepseek-flash"
     assert request["reasoning"] == {"effort": "low"}
-    assert request["max_output_tokens"] == 16000
+    assert request["max_output_tokens"] == 64000
     assert request["text"]["format"]["type"] == "json_schema"
     assert request["text"]["format"]["name"] == "candidate_evaluation_batch"
     assert request["text"]["format"]["schema"]["additionalProperties"] is False
 
 
-def test_deepseek_high_reasoning_uses_larger_batch_output_allowance(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("effort", "expected_limit"),
+    [
+        ("none", 16000),
+        ("low", 64000),
+        ("high", 64000),
+        ("max", 128000),
+    ],
+)
+def test_deepseek_reasoning_efforts_use_safe_output_allowances(
+    monkeypatch, effort: str, expected_limit: int
+) -> None:
     client = _FakeClient(_batch_response({"Total Score": 0}))
     monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
 
@@ -104,7 +115,7 @@ def test_deepseek_high_reasoning_uses_larger_batch_output_allowance(monkeypatch)
         api_key="deepseek-key",
         provider_key=DEEPSEEK_PROVIDER_KEY,
         model="deepseek-flash",
-        reasoning_effort="high",
+        reasoning_effort=effort,
         rubric_text="A rubric",
         candidate=_candidate(),
         role_profile=get_role_profile("design"),
@@ -112,8 +123,31 @@ def test_deepseek_high_reasoning_uses_larger_batch_output_allowance(monkeypatch)
     )
 
     request = client.responses.calls[0]
-    assert request["reasoning"] == {"effort": "high"}
-    assert request["max_output_tokens"] == 48000
+    assert request["reasoning"] == {"effort": effort}
+    assert request["max_output_tokens"] == expected_limit
+
+
+def test_deepseek_reports_output_limit_instead_of_generic_empty_response(monkeypatch) -> None:
+    response = SimpleNamespace(
+        output_text="",
+        status="incomplete",
+        incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+    )
+    client = _FakeClient(_batch_response({}))
+    client.responses = _FakeEndpoint(response)
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
+
+    with pytest.raises(ModelOutputFormatError, match="full output allowance"):
+        evaluate_candidate(
+            api_key="deepseek-key",
+            provider_key=DEEPSEEK_PROVIDER_KEY,
+            model="deepseek-flash",
+            reasoning_effort="low",
+            rubric_text="A rubric",
+            candidate=_candidate(),
+            role_profile=get_role_profile("design"),
+            max_retries=0,
+        )
 
 
 def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:

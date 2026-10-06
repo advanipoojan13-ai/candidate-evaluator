@@ -15,8 +15,9 @@ from .roles import RoleProfile, get_role_profile
 
 BATCH_SIZE = 5
 OPENAI_MAX_RETRIES = 2
-DEEPSEEK_DEFAULT_MAX_OUTPUT_TOKENS = 16000
-DEEPSEEK_HIGH_MAX_OUTPUT_TOKENS = 48000
+DEEPSEEK_NONE_MAX_OUTPUT_TOKENS = 16000
+DEEPSEEK_THINKING_MAX_OUTPUT_TOKENS = 64000
+DEEPSEEK_MAX_EFFORT_OUTPUT_TOKENS = 128000
 
 
 class BatchEvaluationResults(list[tuple[dict[str, Any], dict[str, Any]]]):
@@ -264,10 +265,13 @@ def _create_response(
 
 
 def _deepseek_max_output_tokens(reasoning_effort: str) -> int:
-    """Give high-effort batches room to finish without raising cheaper runs' ceiling."""
-    if reasoning_effort in {"high", "max", "xhigh", "ultra"}:
-        return DEEPSEEK_HIGH_MAX_OUTPUT_TOKENS
-    return DEEPSEEK_DEFAULT_MAX_OUTPUT_TOKENS
+    """Use DeepSeek's documented allowances for each thinking mode."""
+    effort = (reasoning_effort or "none").lower()
+    if effort in {"max", "ultra"}:
+        return DEEPSEEK_MAX_EFFORT_OUTPUT_TOKENS
+    if effort in {"low", "high", "minimal", "medium", "xhigh"}:
+        return DEEPSEEK_THINKING_MAX_OUTPUT_TOKENS
+    return DEEPSEEK_NONE_MAX_OUTPUT_TOKENS
 
 
 def _response_content(response: Any, provider: ProviderProfile) -> str:
@@ -276,7 +280,20 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
     else:
         content = response.choices[0].message.content or ""
     if not content.strip():
-        raise ValueError(f"{provider.label} returned an empty response.")
+        status = _field(response, "status")
+        incomplete_reason = _field(_field(response, "incomplete_details"), "reason")
+        error = _field(response, "error")
+        error_message = _field(error, "message")
+        if incomplete_reason == "max_output_tokens":
+            raise ValueError(
+                f"{provider.label} used the full output allowance before producing the final JSON."
+            )
+        if incomplete_reason == "content_filter":
+            raise ValueError(f"{provider.label} stopped the response because of its content filter.")
+        if status == "failed" and error_message:
+            raise ValueError(f"{provider.label} response failed: {error_message}")
+        status_note = f" (response status: {status})" if status else ""
+        raise ValueError(f"{provider.label} returned an empty response{status_note}.")
     return content
 
 

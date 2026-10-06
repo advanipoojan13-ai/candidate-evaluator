@@ -41,7 +41,7 @@ from candidate_evaluator.progress import (
     save_exports,
     set_current,
 )
-from candidate_evaluator.providers import DEFAULT_PROVIDER_KEY, get_provider, provider_options
+from candidate_evaluator.providers import DEEPSEEK_PROVIDER_KEY, DEFAULT_PROVIDER_KEY, get_provider, provider_options
 from candidate_evaluator.roles import (
     CUSTOM_EVIDENCE_SOURCES,
     CUSTOM_ROLE_KEY,
@@ -759,61 +759,97 @@ def _evaluate_candidate_batch_for_run(
     reasoning_effort: str = "none",
 ) -> dict[str, Any]:
     import time
+    from candidate_evaluator.openai_scoring import ModelOutputFormatError, evaluate_candidates
 
-    started = time.monotonic()
-    try:
-        from candidate_evaluator.openai_scoring import evaluate_candidates
-
-        evaluations = evaluate_candidates(
-            api_key=api_key,
-            provider_key=provider_key,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            rubric_text=rubric_text,
-            candidates=candidates,
-            role_profile=role,
-        )
-        batch_elapsed = time.monotonic() - started
-        elapsed = batch_elapsed / len(candidates)
-        results = []
-        for candidate, (grading, raw) in zip(candidates, evaluations):
-            role_source = {
-                **candidate["source_row"],
-                "Candidate": candidate.get("candidate_name", ""),
-                "Profile URL": candidate.get("linkedin_url", ""),
-                "Rank Number": "",
+    def evaluate_group(group: list[dict[str, Any]]) -> dict[str, Any]:
+        started = time.monotonic()
+        try:
+            evaluations = evaluate_candidates(
+                api_key=api_key,
+                provider_key=provider_key,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                rubric_text=rubric_text,
+                candidates=group,
+                role_profile=role,
+            )
+            batch_elapsed = time.monotonic() - started
+            elapsed = batch_elapsed / len(group)
+            results = []
+            for candidate, (grading, raw) in zip(group, evaluations):
+                role_source = {
+                    **candidate["source_row"],
+                    "Candidate": candidate.get("candidate_name", ""),
+                    "Profile URL": candidate.get("linkedin_url", ""),
+                    "Rank Number": "",
+                }
+                row = apply_calculated_fields({**role_source, **grading}, candidate, role)
+                row = coerce_fixed_row(row, role)
+                errors = validate_output_row(row, role)
+                if errors:
+                    results.append(
+                        {
+                            "state": "skipped",
+                            "error": "Skipped after API call because the grading output was incomplete or invalid: "
+                            + "; ".join(errors),
+                            "raw": raw,
+                            "elapsed_seconds": elapsed,
+                        }
+                    )
+                else:
+                    results.append({"state": "completed", "row": row, "raw": raw, "elapsed_seconds": elapsed})
+            return {"results": results, "usage": evaluations.usage}
+        except ModelOutputFormatError as exc:
+            failed_elapsed = time.monotonic() - started
+            if provider_key == DEEPSEEK_PROVIDER_KEY and len(group) > 1:
+                midpoint = len(group) // 2
+                left = evaluate_group(group[:midpoint])
+                right = evaluate_group(group[midpoint:])
+                results = [*left["results"], *right["results"]]
+                overhead = failed_elapsed / len(group)
+                for result in results:
+                    result["elapsed_seconds"] = float(result.get("elapsed_seconds", 0)) + overhead
+                return {
+                    "results": results,
+                    "usage": _merge_api_usage(getattr(exc, "usage", {}), left["usage"], right["usage"]),
+                }
+            raw_content = getattr(exc, "raw_content", "")
+            result = {
+                "state": "skipped",
+                "error": f"Skipped after API call because the candidate output was empty, incomplete, or unreadable: {exc}",
+                "raw": {"unparsed_content": raw_content} if raw_content else {},
+                "elapsed_seconds": failed_elapsed,
             }
-            row = apply_calculated_fields({**role_source, **grading}, candidate, role)
-            row = coerce_fixed_row(row, role)
-            errors = validate_output_row(row, role)
-            if errors:
-                results.append(
-                    {
-                        "state": "skipped",
-                        "error": "Skipped after API call because the grading output was incomplete or invalid: "
-                        + "; ".join(errors),
-                        "raw": raw,
-                        "elapsed_seconds": elapsed,
-                    }
-                )
-            else:
-                results.append({"state": "completed", "row": row, "raw": raw, "elapsed_seconds": elapsed})
-        return {"results": results, "usage": evaluations.usage}
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raw_content = getattr(exc, "raw_content", "")
-        result = {
-            "state": "skipped",
-            "error": f"Skipped after API call because the batch output was empty, incomplete, or unreadable: {exc}",
-            "raw": {"unparsed_content": raw_content} if raw_content else {},
-            "elapsed_seconds": time.monotonic() - started,
-        }
-        return {
-            "results": [dict(result) for _ in candidates],
-            "usage": getattr(exc, "usage", {}),
-        }
-    except Exception as exc:
-        result = {"state": "failed", "error": str(exc), "elapsed_seconds": time.monotonic() - started}
-        return {"results": [dict(result) for _ in candidates], "usage": {}}
+            return {
+                "results": [dict(result) for _ in group],
+                "usage": getattr(exc, "usage", {}),
+            }
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            result = {
+                "state": "skipped",
+                "error": f"Skipped after API call because the grading output was incomplete or unreadable: {exc}",
+                "raw": {},
+                "elapsed_seconds": time.monotonic() - started,
+            }
+            return {"results": [dict(result) for _ in group], "usage": {}}
+        except Exception as exc:
+            result = {"state": "failed", "error": str(exc), "elapsed_seconds": time.monotonic() - started}
+            return {"results": [dict(result) for _ in group], "usage": {}}
+
+    return evaluate_group(candidates)
+
+
+def _merge_api_usage(*receipts: dict[str, Any]) -> dict[str, int]:
+    fields = (
+        "api_calls",
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+    )
+    return {field: sum(int(receipt.get(field, 0) or 0) for receipt in receipts) for field in fields}
 
 
 def _evaluate_candidate_for_run(

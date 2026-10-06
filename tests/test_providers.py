@@ -90,9 +90,30 @@ def test_deepseek_uses_responses_json_schema_and_selected_reasoning(monkeypatch)
     request = client.responses.calls[0]
     assert request["model"] == "deepseek-flash"
     assert request["reasoning"] == {"effort": "low"}
+    assert request["max_output_tokens"] == 16000
     assert request["text"]["format"]["type"] == "json_schema"
     assert request["text"]["format"]["name"] == "candidate_evaluation_batch"
     assert request["text"]["format"]["schema"]["additionalProperties"] is False
+
+
+def test_deepseek_high_reasoning_uses_larger_batch_output_allowance(monkeypatch) -> None:
+    client = _FakeClient(_batch_response({"Total Score": 0}))
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
+
+    evaluate_candidate(
+        api_key="deepseek-key",
+        provider_key=DEEPSEEK_PROVIDER_KEY,
+        model="deepseek-flash",
+        reasoning_effort="high",
+        rubric_text="A rubric",
+        candidate=_candidate(),
+        role_profile=get_role_profile("design"),
+        max_retries=0,
+    )
+
+    request = client.responses.calls[0]
+    assert request["reasoning"] == {"effort": "high"}
+    assert request["max_output_tokens"] == 32000
 
 
 def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:
@@ -168,6 +189,54 @@ def test_deepseek_accepts_valid_json_with_trailing_text_without_retry(monkeypatc
 
     assert grading == {"Total Score": 42}
     assert raw == {"candidate_number": 1, "grading": {"Total Score": 42}}
+    assert len(client.responses.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        '{"evaluations":[{"candidate_number":1 "grading":{"Total Score":42}}]}',
+        '{"evaluations":[{"candidate_number":1,"grading":{"Total Score":42,}},]}',
+        '{"evaluations":[{"candidate_number":1,"grading":{"Total Score":42}}]',
+    ],
+)
+def test_deepseek_repairs_common_json_syntax_errors_locally_without_retry(monkeypatch, malformed: str) -> None:
+    client = _FakeClient(_batch_response({}))
+    client.responses = _FakeEndpoint(SimpleNamespace(output_text=malformed))
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
+
+    grading, raw = evaluate_candidate(
+        api_key="deepseek-key",
+        provider_key=DEEPSEEK_PROVIDER_KEY,
+        model="deepseek-flash",
+        rubric_text="A rubric",
+        candidate=_candidate(),
+        role_profile=get_role_profile("design"),
+        max_retries=0,
+    )
+
+    assert grading == {"Total Score": 42}
+    assert raw["_response_format_repaired"] is True
+    assert len(client.responses.calls) == 1
+
+
+def test_deepseek_repaired_json_still_requires_complete_batch(monkeypatch) -> None:
+    malformed = '{"evaluations":[{"candidate_number":1,"grading":{"Total Score":42}},]}'
+    client = _FakeClient(_batch_response({}))
+    client.responses = _FakeEndpoint(SimpleNamespace(output_text=malformed))
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
+
+    with pytest.raises(ModelOutputFormatError, match="different number or order"):
+        evaluate_candidates(
+            api_key="deepseek-key",
+            provider_key=DEEPSEEK_PROVIDER_KEY,
+            model="deepseek-flash",
+            rubric_text="A rubric",
+            candidates=[_candidate(), {**_candidate(), "linkedin_profile_id": "person-2"}],
+            role_profile=get_role_profile("design"),
+            max_retries=0,
+        )
+
     assert len(client.responses.calls) == 1
 
 

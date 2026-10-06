@@ -5,6 +5,7 @@ import json
 from datetime import date
 from typing import Any, Optional
 
+from json_repair import repair_json
 from openai import OpenAI
 
 from .evidence import custom_evidence_payload
@@ -14,6 +15,8 @@ from .roles import RoleProfile, get_role_profile
 
 BATCH_SIZE = 5
 OPENAI_MAX_RETRIES = 2
+DEEPSEEK_DEFAULT_MAX_OUTPUT_TOKENS = 16000
+DEEPSEEK_HIGH_MAX_OUTPUT_TOKENS = 32000
 
 
 class BatchEvaluationResults(list[tuple[dict[str, Any], dict[str, Any]]]):
@@ -86,6 +89,7 @@ def evaluate_candidates(
     try:
         content = _response_content(response, provider)
         raw = _parse_response_json(content, allow_surrounding_text=provider.key == DEEPSEEK_PROVIDER_KEY)
+        format_repaired = bool(raw.pop("_response_format_repaired", False))
         evaluations = raw["evaluations"]
         if not isinstance(evaluations, list):
             raise TypeError("The evaluations field is not a JSON array.")
@@ -101,6 +105,8 @@ def evaluate_candidates(
             grading = item.get("grading")
             if not isinstance(grading, dict):
                 raise TypeError("An evaluation grading field is not a JSON object.")
+            if format_repaired:
+                item = {**item, "_response_format_repaired": True}
             results.append((grading, item))
         return BatchEvaluationResults(results, usage)
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
@@ -170,6 +176,7 @@ def _integer_field(value: Any, *names: str) -> int:
 
 
 def _parse_response_json(content: str, *, allow_surrounding_text: bool) -> dict[str, Any]:
+    repaired = False
     if not allow_surrounding_text:
         parsed = json.loads(content)
     else:
@@ -177,9 +184,26 @@ def _parse_response_json(content: str, *, allow_surrounding_text: bool) -> dict[
         object_start = stripped.find("{")
         if object_start < 0:
             raise json.JSONDecodeError("No JSON object found", content, 0)
-        parsed, _ = json.JSONDecoder().raw_decode(stripped[object_start:])
+        candidate_json = stripped[object_start:]
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(candidate_json)
+        except json.JSONDecodeError as original_error:
+            try:
+                parsed = repair_json(
+                    candidate_json,
+                    return_objects=True,
+                    skip_json_loads=True,
+                    ensure_ascii=False,
+                )
+            except (TypeError, ValueError, IndexError) as repair_error:
+                raise original_error from repair_error
+            if parsed in (None, ""):
+                raise original_error
+            repaired = True
     if not isinstance(parsed, dict):
         raise TypeError("The candidate evaluation response is not a JSON object.")
+    if repaired:
+        parsed["_response_format_repaired"] = True
     return parsed
 
 
@@ -212,7 +236,7 @@ def _create_response(
             instructions=fixed_prompt,
             input=request_input,
             reasoning={"effort": reasoning_effort or provider.default_reasoning_effort},
-            max_output_tokens=16000,
+            max_output_tokens=_deepseek_max_output_tokens(reasoning_effort),
             text={
                 "format": {
                     "type": "json_schema",
@@ -237,6 +261,13 @@ def _create_response(
         },
         prompt_cache_key=_prompt_cache_key(model, fixed_prompt),
     )
+
+
+def _deepseek_max_output_tokens(reasoning_effort: str) -> int:
+    """Give high-effort batches room to finish without raising cheaper runs' ceiling."""
+    if reasoning_effort in {"high", "max", "xhigh", "ultra"}:
+        return DEEPSEEK_HIGH_MAX_OUTPUT_TOKENS
+    return DEEPSEEK_DEFAULT_MAX_OUTPUT_TOKENS
 
 
 def _response_content(response: Any, provider: ProviderProfile) -> str:

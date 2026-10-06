@@ -113,7 +113,7 @@ def test_deepseek_high_reasoning_uses_larger_batch_output_allowance(monkeypatch)
 
     request = client.responses.calls[0]
     assert request["reasoning"] == {"effort": "high"}
-    assert request["max_output_tokens"] == 32000
+    assert request["max_output_tokens"] == 48000
 
 
 def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:

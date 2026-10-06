@@ -16,7 +16,7 @@ from .roles import RoleProfile, get_role_profile
 BATCH_SIZE = 5
 OPENAI_MAX_RETRIES = 2
 DEEPSEEK_DEFAULT_MAX_OUTPUT_TOKENS = 16000
-DEEPSEEK_HIGH_MAX_OUTPUT_TOKENS = 32000
+DEEPSEEK_HIGH_MAX_OUTPUT_TOKENS = 48000
 
 
 class BatchEvaluationResults(list[tuple[dict[str, Any], dict[str, Any]]]):

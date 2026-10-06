@@ -22,16 +22,15 @@ from candidate_evaluator.extractor import (
 )
 from candidate_evaluator.progress import (
     candidate_status_rows,
+    commit_batch_results,
     completed_preview_rows,
     init_run,
     load_candidates,
     load_status,
     make_run_id,
-    mark_completed,
-    mark_failed,
     mark_skipped,
     progress_counts,
-    record_api_usage,
+    recover_batch_results,
     reset_running,
     result_rows,
     result_rows_by_id,
@@ -604,6 +603,7 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     candidates = load_candidates(run_id)
+    recover_batch_results(run_id)
     reset_running(run_id)
     status = load_status(run_id)
     provider_key = status.get("provider", DEFAULT_PROVIDER_KEY)
@@ -682,24 +682,9 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
             for future in done:
                 candidates_in_batch = active.pop(future)
                 batch_result = future.result()
-                record_api_usage(run_id, batch_result["usage"])
-                results = batch_result["results"]
-                for candidate, result in zip(candidates_in_batch, results):
-                    candidate_id = candidate["linkedin_profile_id"]
-                    if result["state"] == "completed":
-                        mark_completed(run_id, candidate_id, result["row"], result["raw"], result["elapsed_seconds"])
-                    elif result["state"] == "skipped":
-                        mark_skipped(
-                            run_id,
-                            candidate_id,
-                            result["error"],
-                            raw_response=result.get("raw"),
-                            elapsed_seconds=result["elapsed_seconds"],
-                        )
-                    else:
-                        mark_failed(run_id, candidate_id, result["error"], elapsed_seconds=result["elapsed_seconds"])
-                    completed_in_pass += 1
-                    progress.progress(completed_in_pass / total)
+                commit_batch_results(run_id, candidates_in_batch, batch_result)
+                completed_in_pass += len(candidates_in_batch)
+                progress.progress(completed_in_pass / total)
 
             while pending and len(active) < max_workers:
                 _submit_candidate_batch(

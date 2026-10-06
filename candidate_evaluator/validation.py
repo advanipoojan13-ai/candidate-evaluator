@@ -63,7 +63,7 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
         if not value:
             continue
         if len(evidence_columns) == 1:
-            evidence_items.extend(item.strip() for item in re.split(r"\s*(?:\||\n|•)\s*", value) if item.strip())
+            evidence_items.extend(_split_evidence_items(value))
         else:
             evidence_items.append(value)
     if len(evidence_items) > 3:
@@ -95,6 +95,12 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
                 fixed[column] = int(fixed[column])
             else:
                 fixed[column] = float(fixed[column]) if role.numeric_scores else int(fixed[column])
+    evidence_columns = role.strongest_evidence_columns or [f"Strongest Evidence {i}" for i in range(1, 4)]
+    if len(evidence_columns) == 1:
+        column = evidence_columns[0]
+        items = _split_evidence_items(str(fixed.get(column, "") or ""))
+        if len(items) > 3:
+            fixed[column] = " | ".join(items[:3])
     return fixed
 
 
@@ -188,3 +194,7 @@ def _format_years_and_months(total_months: int) -> str:
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b[\w'-]+\b", text))
+
+
+def _split_evidence_items(value: str) -> list[str]:
+    return [item.strip() for item in re.split(r"\s*(?:\||\n|•)\s*", value) if item.strip()]

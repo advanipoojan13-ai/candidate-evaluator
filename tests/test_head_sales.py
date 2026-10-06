@@ -212,6 +212,16 @@ def test_validation_enforces_warnings_evidence_count_and_rationale_limit() -> No
     assert any("no longer than 50 words" in error for error in errors)
 
 
+def test_python_keeps_first_three_evidence_items_instead_of_skipping_candidate() -> None:
+    grading = _model_grading()
+    grading["Strongest Evidence"] = "One | Two | Three | Four | Five"
+
+    row = _calculated_row(grading)
+
+    assert row["Strongest Evidence"] == "One | Two | Three"
+    assert validate_output_row(row, "head_sales") == []
+
+
 def test_head_sales_ranking_uses_capability_order_then_candidate_name() -> None:
     base = _calculated_row()
     higher_dealer = {

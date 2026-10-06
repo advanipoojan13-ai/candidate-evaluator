@@ -3,8 +3,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
+from candidate_evaluator import progress as progress_module
 from candidate_evaluator.progress import (
     candidate_status_rows,
+    commit_batch_results,
     completed_preview_rows,
     init_run,
     load_status,
@@ -13,9 +17,22 @@ from candidate_evaluator.progress import (
     mark_skipped,
     progress_counts,
     record_api_usage,
+    recover_batch_results,
     result_rows,
     role_for_run,
 )
+
+
+def _batch_usage() -> dict[str, int]:
+    return {
+        "api_calls": 1,
+        "input_tokens": 100,
+        "cached_input_tokens": 80,
+        "cache_write_tokens": 0,
+        "output_tokens": 40,
+        "reasoning_tokens": 30,
+        "total_tokens": 140,
+    }
 
 
 def test_progress_tracks_completed_and_failed(tmp_path: Path, monkeypatch) -> None:
@@ -213,3 +230,89 @@ def test_progress_accumulates_real_usage_receipts_across_batches(tmp_path: Path,
         "reasoning_tokens": 180,
         "total_tokens": 19400,
     }
+
+
+def test_batch_results_and_usage_are_committed_together(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidates = [
+        {"source_index": 0, "linkedin_profile_id": "a", "source_row": {"Candidate Name": "A"}},
+        {"source_index": 1, "linkedin_profile_id": "b", "source_row": {"Candidate Name": "B"}},
+    ]
+    init_run("run-batch", candidates, "rubric", "model")
+
+    commit_batch_results(
+        "run-batch",
+        candidates,
+        {
+            "usage": _batch_usage(),
+            "results": [
+                {
+                    "state": "completed",
+                    "row": {"Candidate Name": "A", "Total Score": 10},
+                    "raw": {"candidate_number": 1},
+                    "elapsed_seconds": 2,
+                },
+                {
+                    "state": "completed",
+                    "row": {"Candidate Name": "B", "Total Score": 20},
+                    "raw": {"candidate_number": 2},
+                    "elapsed_seconds": 2,
+                },
+            ],
+        },
+    )
+
+    counts = progress_counts("run-batch")
+    assert counts["completed"] == 2
+    assert counts["remaining"] == 0
+    assert counts["api_usage"] == _batch_usage()
+    assert result_rows("run-batch") == [
+        {"Candidate Name": "A", "Total Score": 10},
+        {"Candidate Name": "B", "Total Score": 20},
+    ]
+
+
+def test_staged_batch_is_recovered_after_interruption_without_double_charging(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidates = [
+        {"source_index": 0, "linkedin_profile_id": "a", "source_row": {"Candidate Name": "A"}},
+        {"source_index": 1, "linkedin_profile_id": "b", "source_row": {"Candidate Name": "B"}},
+    ]
+    init_run("run-recovery", candidates, "rubric", "model")
+    batch_result = {
+        "usage": _batch_usage(),
+        "results": [
+            {
+                "state": "completed",
+                "row": {"Candidate Name": "A"},
+                "raw": {"candidate_number": 1},
+                "elapsed_seconds": 3,
+            },
+            {
+                "state": "completed",
+                "row": {"Candidate Name": "B"},
+                "raw": {"candidate_number": 2},
+                "elapsed_seconds": 3,
+            },
+        ],
+    }
+
+    original_apply = progress_module._apply_batch_receipt
+    monkeypatch.setattr(
+        progress_module,
+        "_apply_batch_receipt",
+        lambda _run_id, _receipt: (_ for _ in ()).throw(RuntimeError("simulated page interruption")),
+    )
+    with pytest.raises(RuntimeError, match="simulated page interruption"):
+        commit_batch_results("run-recovery", candidates, batch_result)
+
+    assert progress_counts("run-recovery")["completed"] == 0
+    assert progress_counts("run-recovery")["api_usage"]["api_calls"] == 0
+
+    monkeypatch.setattr(progress_module, "_apply_batch_receipt", original_apply)
+    assert recover_batch_results("run-recovery") == 1
+    assert progress_counts("run-recovery")["completed"] == 2
+    assert progress_counts("run-recovery")["api_usage"] == _batch_usage()
+
+    assert recover_batch_results("run-recovery") == 0
+    assert progress_counts("run-recovery")["api_usage"] == _batch_usage()

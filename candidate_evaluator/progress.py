@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -120,6 +121,110 @@ def record_api_usage(run_id: str, usage: dict[str, Any]) -> None:
         _write_json(run_dir(run_id) / "status.json", status)
 
 
+def commit_batch_results(
+    run_id: str,
+    candidates: list[dict[str, Any]],
+    batch_result: dict[str, Any],
+) -> None:
+    """Durably stage a full API response before applying any candidate updates."""
+    results = batch_result.get("results") or []
+    if len(results) != len(candidates):
+        raise ValueError(
+            f"Cannot commit batch: received {len(results)} results for {len(candidates)} candidates."
+        )
+    receipt = {
+        "receipt_id": uuid.uuid4().hex,
+        "usage": batch_result.get("usage") or {},
+        "candidates": [
+            {
+                "candidate_id": candidate["linkedin_profile_id"],
+                "result": result,
+            }
+            for candidate, result in zip(candidates, results)
+        ],
+    }
+    receipt_path = run_dir(run_id) / "batch_receipts" / f"{receipt['receipt_id']}.json"
+    _write_json(receipt_path, receipt)
+    _apply_batch_receipt(run_id, receipt)
+
+
+def recover_batch_results(run_id: str) -> int:
+    """Replay staged responses after a page rerun or process interruption."""
+    receipts_dir = run_dir(run_id) / "batch_receipts"
+    if not receipts_dir.exists():
+        return 0
+    recovered = 0
+    for receipt_path in sorted(receipts_dir.glob("*.json")):
+        receipt = json.loads(_read_text_with_retries(receipt_path))
+        if _apply_batch_receipt(run_id, receipt):
+            recovered += 1
+    return recovered
+
+
+def _apply_batch_receipt(run_id: str, receipt: dict[str, Any]) -> bool:
+    receipt_id = str(receipt.get("receipt_id") or "")
+    if not receipt_id:
+        raise ValueError("Batch receipt is missing its receipt ID.")
+    with _locked_run(run_id):
+        path = run_dir(run_id)
+        status = load_status(run_id)
+        if status.get("_load_error"):
+            raise RuntimeError(f"Could not commit batch results for run {run_id}: {status['_load_error']}")
+        applied = status.setdefault("applied_batch_receipts", [])
+        if receipt_id in applied:
+            return False
+
+        completed_items = []
+        raw_items = []
+        failed_items = []
+        skipped_items = []
+        updated_at = datetime.now().isoformat(timespec="seconds")
+        for item in receipt.get("candidates") or []:
+            candidate_id = item["candidate_id"]
+            result = item.get("result") or {}
+            state = result.get("state")
+            entry = status["candidates"].setdefault(candidate_id, {})
+            elapsed = result.get("elapsed_seconds")
+            if state == "completed":
+                completed_items.append({"candidate_id": candidate_id, "row": result["row"]})
+                raw_items.append({"candidate_id": candidate_id, "raw_response": result.get("raw") or {}})
+                entry.update({"state": "completed", "error": "", "updated_at": updated_at})
+            elif state == "skipped":
+                reason = str(result.get("error") or "Skipped after API call.")
+                skipped_items.append(
+                    {"candidate_id": candidate_id, "reason": reason, "raw_response": result.get("raw") or {}}
+                )
+                entry.update({"state": "skipped", "error": reason, "updated_at": updated_at})
+            else:
+                error = str(result.get("error") or "Evaluation failed.")
+                failed_items.append(
+                    {"candidate_id": candidate_id, "error": error, "raw_response": result.get("raw") or {}}
+                )
+                entry.update({"state": "failed", "error": error, "updated_at": updated_at})
+            if elapsed is None:
+                entry.pop("elapsed_seconds", None)
+            else:
+                entry["elapsed_seconds"] = round(float(elapsed), 3)
+
+        _upsert_jsonl(path / "rows.jsonl", completed_items)
+        _upsert_jsonl(path / "raw_responses.jsonl", raw_items)
+        _upsert_jsonl(path / "failed.jsonl", failed_items)
+        _upsert_jsonl(path / "skipped.jsonl", skipped_items)
+
+        totals = status.setdefault("api_usage", _empty_api_usage())
+        usage = receipt.get("usage") or {}
+        for field in _empty_api_usage():
+            try:
+                totals[field] = int(totals.get(field, 0)) + int(usage.get(field, 0))
+            except (TypeError, ValueError):
+                totals[field] = int(totals.get(field, 0))
+        applied.append(receipt_id)
+        if not any(item.get("state") == "running" for item in status.get("candidates", {}).values()):
+            status["current_candidate"] = ""
+        _write_json(path / "status.json", status)
+        return True
+
+
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -133,6 +238,22 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
         if line.strip():
             rows.append(json.loads(line))
     return rows
+
+
+def _upsert_jsonl(path: Path, payloads: list[dict[str, Any]]) -> None:
+    if not payloads:
+        return
+    existing = load_jsonl(path)
+    positions = {item.get("candidate_id"): index for index, item in enumerate(existing)}
+    for payload in payloads:
+        candidate_id = payload.get("candidate_id")
+        if candidate_id in positions:
+            existing[positions[candidate_id]] = payload
+        else:
+            positions[candidate_id] = len(existing)
+            existing.append(payload)
+    text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in existing)
+    _write_text(path, text)
 
 
 def mark_completed(
@@ -415,6 +536,13 @@ def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    temp_path.write_text(text, encoding="utf-8")
     temp_path.replace(path)
 
 

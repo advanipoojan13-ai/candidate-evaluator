@@ -349,7 +349,7 @@ HEAD_SALES_WARNING_ENUMS = {
 
 
 ZEISS_VISIOGEN_CAPABILITIES = [
-    ("US Market Sales Experience", 15, 1.5),
+    ("International Market Sales Experience", 15, 1.5),
     ("Lead Generation and New Business Prospecting", 15, 1.5),
     ("Sales Pipeline Management and Conversion", 15, 1.5),
     ("Key Account Management and Account Growth", 15, 1.5),
@@ -385,7 +385,7 @@ ZEISS_VISIOGEN_COMPONENT_COLUMNS = [
 ]
 
 ZEISS_VISIOGEN_WARNING_ENUMS = {
-    "US Market Sales Unverified": ["Yes", "No"],
+    "International Market Sales Unverified": ["Yes", "No"],
     "Lead Generation / Prospecting Unverified": ["Yes", "No"],
     "Pipeline / Conversion Unverified": ["Yes", "No"],
     "Key Account Management Unverified": ["Yes", "No"],

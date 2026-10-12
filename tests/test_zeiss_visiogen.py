@@ -12,7 +12,7 @@ from candidate_evaluator.validation import apply_calculated_fields, coerce_fixed
 
 
 CAPABILITIES = [
-    "US Market Sales Experience",
+    "International Market Sales Experience",
     "Lead Generation and New Business Prospecting",
     "Sales Pipeline Management and Conversion",
     "Key Account Management and Account Growth",
@@ -62,7 +62,7 @@ def _model_grading(value: int = 2) -> dict:
     grading = {column: value for column in role.component_score_maxima}
     grading.update(
         {
-            "US Market Sales Unverified": "No",
+            "International Market Sales Unverified": "No",
             "Lead Generation / Prospecting Unverified": "No",
             "Pipeline / Conversion Unverified": "No",
             "Key Account Management Unverified": "No",
@@ -146,7 +146,7 @@ def test_python_overwrites_model_supplied_mechanical_values() -> None:
     grading.update({column: 0 for column in get_role_profile("zeiss_visiogen").category_scores})
     grading["Final Score (/75)"] = 0
     row = _calculated_row(grading)
-    assert row["US Market Sales Experience Score (/15)"] == 9
+    assert row["International Market Sales Experience Score (/15)"] == 9
     assert row["Final Score (/75)"] == 45
 
 
@@ -181,10 +181,10 @@ def test_validation_enforces_warning_enums_evidence_count_and_rationale_limit() 
 
 def test_ranking_uses_capability_order_then_name() -> None:
     base = _calculated_row()
-    higher_us = {**base, "Candidate": "Zulu", "US Market Sales Experience Score (/15)": 10, "Lead Generation and New Business Prospecting Score (/15)": 8}
-    higher_leads = {**base, "Candidate": "Alpha", "US Market Sales Experience Score (/15)": 9, "Lead Generation and New Business Prospecting Score (/15)": 9}
-    higher_us["Final Score (/75)"] = higher_leads["Final Score (/75)"] = 45
-    ranked = prepare_output_rows([higher_leads, higher_us], "zeiss_visiogen")
+    higher_international = {**base, "Candidate": "Zulu", "International Market Sales Experience Score (/15)": 10, "Lead Generation and New Business Prospecting Score (/15)": 8}
+    higher_leads = {**base, "Candidate": "Alpha", "International Market Sales Experience Score (/15)": 9, "Lead Generation and New Business Prospecting Score (/15)": 9}
+    higher_international["Final Score (/75)"] = higher_leads["Final Score (/75)"] = 45
+    ranked = prepare_output_rows([higher_leads, higher_international], "zeiss_visiogen")
     assert [row["Candidate"] for row in ranked] == ["Zulu", "Alpha"]
 
     ranked = prepare_output_rows([{**base, "Candidate": "Beta"}, {**base, "Candidate": "Alpha"}], "zeiss_visiogen")

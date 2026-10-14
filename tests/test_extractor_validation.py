@@ -297,6 +297,26 @@ def test_backend_duplicate_merge_preserves_distinct_roles() -> None:
     assert merged[0]["experience_skills"] == ["PHP", "AWS"]
 
 
+def test_duplicate_merge_preserves_a_location_from_either_copy() -> None:
+    duplicate = {
+        "index": 0,
+        "company_name": "Example",
+        "position_or_title": "Account Executive",
+        "start_date": "2024",
+        "end_date": "Present",
+        "duration": "2 years",
+        "description": "Managed accounts.",
+        "experience_location": "",
+        "experience_skills": [],
+    }
+    merged = merge_duplicate_experiences(
+        [duplicate, {**duplicate, "index": 1, "experience_location": "New York, United States"}]
+    )
+
+    assert len(merged) == 1
+    assert merged[0]["experience_location"] == "New York, United States"
+
+
 def test_candidate_input_issues_blocks_post_data_without_profile_evidence() -> None:
     candidates = normalize_candidates(
         [

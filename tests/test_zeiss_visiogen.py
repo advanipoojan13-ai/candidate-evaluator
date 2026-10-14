@@ -205,7 +205,7 @@ def test_payload_is_minimal_includes_employment_type_and_merges_duplicates() -> 
             "projects": [{"title": "Unused project"}],
             "websites": ["https://unused.example"],
             "experience": [
-                {"companyName": "Sales Co", "title": "Account Executive", "description": "Prospected.", "employmentType": "Internship", "startDate": "2023", "endDate": "2024", "duration": "1 year", "skills": ["Unused role skill"]},
+                {"companyName": "Sales Co", "title": "Account Executive", "description": "Prospected.", "location": "New York, United States", "employmentType": "Internship", "startDate": "2023", "endDate": "2024", "duration": "1 year", "skills": ["Unused role skill"]},
                 {"companyName": "Sales Co", "title": "Account Executive", "description": "Closed deals.", "employmentType": "Internship", "startDate": "2023", "endDate": "2024", "duration": "1 year", "skills": ["Another unused skill"]},
             ],
         },
@@ -215,8 +215,11 @@ def test_payload_is_minimal_includes_employment_type_and_merges_duplicates() -> 
     assert set(payload) == {"LinkedIn Profile ID", "LinkedIn URL", "Candidate Name", "Headline", "About", "experiences"}
     assert len(payload["experiences"]) == 1
     assert payload["experiences"][0]["description"] == "Prospected. | Closed deals."
+    assert payload["experiences"][0]["experience_location"] == "New York, United States"
     assert payload["experiences"][0]["employment_type"] == "Internship"
     assert "experience_skills" not in payload["experiences"][0]
+    assert "workplace_type" not in payload["experiences"][0]
+    assert "company_location" not in payload["experiences"][0]
     assert "Location" not in payload and "Education" not in payload and "Skills" not in payload and "Projects" not in payload
 
 
@@ -236,6 +239,21 @@ def test_title_only_and_unrelated_current_role_are_sent_with_dates() -> None:
     assert payload["experiences"][2]["start_date"] == ""
     assert payload["experiences"][2]["end_date"] == ""
     assert candidate_input_issue(title_only, role.key, role.evidence_sources, role.require_experience, role.skip_if_no_evidence) == ""
+
+
+def test_missing_experience_location_is_safe_and_sent_as_empty() -> None:
+    candidate = normalize_candidate(
+        {
+            "publicIdentifier": "no-location",
+            "linkedinUrl": "https://www.linkedin.com/in/no-location/",
+            "fullName": "No Location",
+            "experience": [{"companyName": "Sales Co", "title": "Account Executive"}],
+        },
+        0,
+    )
+
+    payload = _candidate_payload(candidate, get_role_profile("zeiss_visiogen"))
+    assert payload["experiences"][0]["experience_location"] == ""
 
 
 def test_headline_about_and_title_only_profiles_are_not_skipped() -> None:

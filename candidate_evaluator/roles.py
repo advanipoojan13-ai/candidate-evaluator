@@ -651,6 +651,7 @@ ROLE_PROFILES = {
             "company_name",
             "position_or_title",
             "description",
+            "experience_location",
             "employment_type",
             "start_date",
             "end_date",

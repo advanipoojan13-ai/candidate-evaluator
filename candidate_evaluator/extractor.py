@@ -13,6 +13,7 @@ ALLOWED_EXPERIENCE_FIELDS = [
     "position",
     "title",
     "description",
+    "location",
     "employmentType",
     "startDate",
     "endDate",
@@ -204,6 +205,8 @@ def merge_duplicate_experiences(experiences: list[dict[str, Any]]) -> list[dict[
             continue
         descriptions = [existing.get("description", ""), experience.get("description", "")]
         existing["description"] = " | ".join(dict.fromkeys(text for text in descriptions if text))
+        if not existing.get("experience_location") and experience.get("experience_location"):
+            existing["experience_location"] = experience["experience_location"]
         existing["experience_skills"] = list(
             dict.fromkeys([*(existing.get("experience_skills") or []), *(experience.get("experience_skills") or [])])
         )
@@ -217,6 +220,7 @@ def _normalize_experience(exp: dict[str, Any], index: int) -> dict[str, Any]:
         "company_name": _clean(exp.get("companyName")),
         "position_or_title": _clean(_first_nonempty(exp.get("position"), exp.get("title"))),
         "description": _clean(exp.get("description")),
+        "experience_location": _format_location(exp.get("location")),
         "employment_type": _clean(exp.get("employmentType")),
         "start_date": _format_date(exp.get("startDate")),
         "end_date": end_date,
@@ -276,6 +280,7 @@ def _format_experience_for_cell(exp: dict[str, Any]) -> str:
     parts = [
         exp.get("position_or_title"),
         exp.get("company_name"),
+        exp.get("experience_location"),
         exp.get("employment_type"),
         _date_range(exp.get("start_date"), exp.get("end_date")),
         exp.get("duration"),

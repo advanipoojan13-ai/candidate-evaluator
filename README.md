@@ -22,9 +22,10 @@ Use **Evaluation role** to choose the scoring mode:
 - **Backend Engineer** uses the bundled 60-point PHP, Python, Laravel, and AWS rubric, including decimal scores, evidence warnings, and deterministic rank numbers.
 - **AI Engineer TRJ** uses the bundled 100-point AI and automation rubric, including capability-specific evidence, recency and duration scoring, evidence warnings, and deterministic rank numbers.
 - **Head Sales** uses a user-uploaded rubric and a fixed 60-point component-scoring contract. The model returns Evidence, Impact, and Duration points; Python calculates weighted capability scores, the final score, and deterministic rank numbers.
+- **SDE3** uses the bundled 62-point Agentic AI Technical Lead rubric. Python cleans the permitted LinkedIn evidence first, the model returns Evidence, Recency, and Duration judgments once, and Python calculates all weighted scores, the final score, and rank.
 - **Custom Role** creates a validated scoring contract from a role name, scoring categories, category maxima, optional discrete scores, outcome bands, and permitted LinkedIn evidence sources.
 
-Backend Engineer automatically loads `rubrics/backend_engineer.md`, and AI Engineer TRJ automatically loads `rubrics/ai_engineer_trj.md`. You may still upload a replacement rubric, but it must preserve the selected role's scoring categories and output contract.
+Backend Engineer automatically loads `rubrics/backend_engineer.md`, AI Engineer TRJ automatically loads `rubrics/ai_engineer_trj.md`, and SDE3 automatically loads `rubrics/sde3.md`. You may still upload a replacement rubric, but it must preserve the selected role's scoring categories and output contract.
 
 Head Sales does not load a bundled rubric. Select the role and upload a compatible Markdown rubric for every new run.
 

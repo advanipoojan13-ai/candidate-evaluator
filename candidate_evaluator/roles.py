@@ -419,6 +419,73 @@ ZEISS_VISIOGEN_OUTPUT_COLUMNS = [
 ]
 
 
+SDE3_CAPABILITIES = [
+    ("Shipped AI Agent / Agent-Chatbot Delivery", 20, 2.0),
+    ("FastAPI / Django", 18, 1.8),
+    ("Backend / System Architecture", 14, 1.4),
+    ("AI Solution Breadth & Judgment", 10, 1.0),
+]
+
+SDE3_CATEGORY_SCORES = OrderedDict(
+    (f"{name} Score (/{maximum})", maximum) for name, maximum, _ in SDE3_CAPABILITIES
+)
+
+SDE3_COMPONENT_SCORING = OrderedDict(
+    (
+        f"{name} Score (/{maximum})",
+        ComponentScoreRule(
+            evidence_column=f"{name} — Evidence Points",
+            impact_column=f"{name} — Recency Points",
+            duration_column=f"{name} — Evidenced Duration Points",
+            multiplier=multiplier,
+            evidence_maximum=4,
+            impact_maximum=3,
+            duration_maximum=3,
+        ),
+    )
+    for name, maximum, multiplier in SDE3_CAPABILITIES
+)
+
+SDE3_COMPONENT_COLUMNS = [
+    column
+    for rule in SDE3_COMPONENT_SCORING.values()
+    for column in rule.columns
+]
+
+SDE3_WARNING_ENUMS = {
+    "Shipped AI Agent / Agent-Chatbot Unverified": ["Yes", "No"],
+    "FastAPI / Django Unverified": ["Yes", "No"],
+    "Backend / System Architecture Unverified": ["Yes", "No"],
+    "Date-Quality Warning": ["Yes", "No"],
+}
+
+SDE3_GRADING_COLUMNS = [
+    "Current Company",
+    "Current Title",
+    *SDE3_CATEGORY_SCORES,
+    "Final Score (/62)",
+    *SDE3_WARNING_ENUMS,
+    "Strongest Evidence",
+    "Missing or Unclear Information",
+    "Score Rationale",
+    *SDE3_COMPONENT_COLUMNS,
+]
+
+SDE3_OUTPUT_COLUMNS = [
+    "Rank Number",
+    "Candidate",
+    "Profile URL",
+    "Current Company",
+    "Current Title",
+    *SDE3_CATEGORY_SCORES,
+    "Final Score (/62)",
+    *SDE3_WARNING_ENUMS,
+    "Strongest Evidence",
+    "Missing or Unclear Information",
+    "Score Rationale",
+]
+
+
 ROLE_PROFILES = {
     "design": RoleProfile(
         key="design",
@@ -657,6 +724,53 @@ ROLE_PROFILES = {
             "end_date",
             "is_current",
             "duration",
+        ],
+    ),
+    "sde3": RoleProfile(
+        key="sde3",
+        label="SDE3",
+        role_name="SDE3 - Agentic AI Technical Lead",
+        grading_columns=SDE3_GRADING_COLUMNS,
+        category_scores=SDE3_CATEGORY_SCORES,
+        allowed_scores={},
+        total_column="Final Score (/62)",
+        total_max=62,
+        outcome_column="Rank Number",
+        outcome_bands=[],
+        evidence_confidence_values=["High", "Medium", "Low"],
+        system_prompt="You are a strict LinkedIn evidence evaluator for the SDE3 - Agentic AI Technical Lead role.",
+        instructions=[
+            "Return Evidence, capability-specific Recency, and Evidenced Duration component points for all four capabilities; Python calculates every weighted capability score, the final score, and rank.",
+            "Do not calculate or return weighted capability scores, the final score, rank, Current Company, or Current Title.",
+            "Judge Recency separately for each capability; an unrelated current role does not make older capability evidence recent.",
+            "Use the strongest valid source once, do not stack repeated mentions, and do not infer personal work from an employer, title, framework keyword, or team outcome.",
+            "Warnings do not change the score, and missing evidence must be described neutrally as unverified or not stated.",
+            "Return no more than three material Strongest Evidence points separated by ' | ' and keep Score Rationale to 50 words or fewer.",
+        ],
+        internal_role_flag_name="relevant_sde3_role",
+        internal_role_evidence_name="sde3_evidence_extracted",
+        export_columns=SDE3_OUTPUT_COLUMNS,
+        numeric_scores=True,
+        ranked=True,
+        column_enums=SDE3_WARNING_ENUMS,
+        ranking_tiebreaker_columns=list(SDE3_CATEGORY_SCORES),
+        strongest_evidence_columns=["Strongest Evidence"],
+        rationale_min_words=0,
+        rationale_max_words=50,
+        evidence_sources=["Headline", "About", "All experiences", "Projects"],
+        require_experience=False,
+        skip_if_no_evidence=False,
+        component_scoring=SDE3_COMPONENT_SCORING,
+        experience_fields=[
+            "index",
+            "company_name",
+            "position_or_title",
+            "description",
+            "start_date",
+            "end_date",
+            "is_current",
+            "duration",
+            "experience_skills",
         ],
     ),
 }

@@ -369,6 +369,7 @@ def _default_rubric_path(role_key: str) -> str:
     bundled_rubrics = {
         "backend": "backend_engineer.md",
         "ai_engineer_trj": "ai_engineer_trj.md",
+        "sde3": "sde3.md",
     }
     if role_key in bundled_rubrics:
         bundled = Path(__file__).parent / "rubrics" / bundled_rubrics[role_key]
@@ -786,7 +787,7 @@ def _evaluate_candidate_batch_for_run(
             return {"results": results, "usage": evaluations.usage}
         except ModelOutputFormatError as exc:
             failed_elapsed = time.monotonic() - started
-            if provider_key == DEEPSEEK_PROVIDER_KEY and len(group) > 1:
+            if provider_key == DEEPSEEK_PROVIDER_KEY and len(group) > 1 and role.key != "sde3":
                 midpoint = len(group) // 2
                 left = evaluate_group(group[:midpoint])
                 right = evaluate_group(group[midpoint:])

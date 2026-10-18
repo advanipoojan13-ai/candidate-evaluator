@@ -98,7 +98,7 @@ def test_cache_key_is_stable_for_same_rubric_and_changes_with_rubric() -> None:
     )
 
 
-@pytest.mark.parametrize("role_key", ["design", "qa", "backend"])
+@pytest.mark.parametrize("role_key", ["design", "qa", "backend", "sde3"])
 def test_fixed_prompt_keeps_each_universal_safeguard_once(role_key) -> None:
     prompt = _fixed_prompt(get_role_profile(role_key), "Unique rubric body.")
 
@@ -247,6 +247,19 @@ def test_more_than_five_candidates_must_be_split_before_api_call() -> None:
                 "P&L & Commercial Ownership Score (/9)",
                 "Sales Strategy & Operating Systems Score (/6)",
                 "Final Score (/60)",
+                "Rank Number",
+            },
+        ),
+        (
+            "sde3",
+            {
+                "Current Company",
+                "Current Title",
+                "Shipped AI Agent / Agent-Chatbot Delivery Score (/20)",
+                "FastAPI / Django Score (/18)",
+                "Backend / System Architecture Score (/14)",
+                "AI Solution Breadth & Judgment Score (/10)",
+                "Final Score (/62)",
                 "Rank Number",
             },
         ),

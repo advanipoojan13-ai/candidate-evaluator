@@ -78,11 +78,14 @@ def evaluate_candidates(
         raise ValueError(f"An evaluation batch must contain between 1 and {BATCH_SIZE} candidates.")
 
     provider = get_provider(provider_key)
-    client_kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": max_retries}
+    role = role_profile or get_role_profile(role_key)
+    # SDE3 is intentionally single-pass: a candidate batch is sent once and
+    # invalid output is handled locally instead of resending candidate data.
+    client_retries = 0 if role.key == "sde3" else max_retries
+    client_kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": client_retries}
     if provider.base_url:
         client_kwargs["base_url"] = provider.base_url
     client = OpenAI(**client_kwargs)
-    role = role_profile or get_role_profile(role_key)
     response = _create_response(client, provider, model, rubric_text, candidates, role, reasoning_effort)
     usage = _response_usage(response)
 
@@ -299,7 +302,7 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen"}:
+    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "sde3"}:
         experiences = merge_duplicate_experiences(experiences)
     candidate = {**candidate, "experiences": experiences}
     payload = {

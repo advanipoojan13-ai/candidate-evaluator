@@ -75,7 +75,13 @@ def _model_grading(value: int = 2) -> dict:
             "Date-Quality Warning": "No",
             "Strongest Evidence": "Current Co: deployed AI agent | Current Co: FastAPI delivery | Support Agent: deployed LLM system",
             "Missing or Unclear Information": "Sustained ownership duration is not fully stated.",
-            "Score Rationale": "Current experience explicitly supports shipped agent delivery, FastAPI, backend implementation, and applied AI design choices.",
+            "Score Rationale": (
+                "Shipped AI Agent / Agent-Chatbot Delivery: Current Co explicitly states that the candidate built and deployed an AI agent, while sustained ownership beyond the current role is not established. "
+                "FastAPI / Django: The same current experience explicitly connects FastAPI to the delivered agent, but no earlier framework use is stated. "
+                "Backend / System Architecture: The current role shows backend implementation, although broader architecture ownership and longer-term responsibility remain unclear. "
+                "AI Solution Breadth & Judgment: LangGraph and retrieval work support applied AI breadth, but evaluation and model-selection decisions are not described. "
+                "Overall: Strong current agent and FastAPI evidence is moderated by limited duration and architecture detail."
+            ),
         }
     )
     return grading
@@ -103,6 +109,15 @@ def test_sde3_is_a_dedicated_selectable_role_with_bundled_rubric() -> None:
     assert sum(role.category_scores.values()) == 62
     assert len(role.component_score_maxima) == 12
     assert set(role.component_score_maxima).isdisjoint(role.output_columns)
+    assert role.rationale_max_words == 200
+    assert role.rationale_required_sections == [
+        "Shipped AI Agent / Agent-Chatbot Delivery:",
+        "FastAPI / Django:",
+        "Backend / System Architecture:",
+        "AI Solution Breadth & Judgment:",
+        "Overall:",
+    ]
+    assert any("no more than 200 words" in instruction for instruction in role.instructions)
     assert Path(_default_rubric_path("sde3")).name == "sde3.md"
     assert Path(_default_rubric_path("sde3")).is_file()
 
@@ -190,13 +205,42 @@ def test_validation_enforces_warnings_evidence_count_and_rationale_limit() -> No
     row = _calculated_row()
     row["Date-Quality Warning"] = "Maybe"
     row["Strongest Evidence"] = "One | Two | Three | Four"
-    row["Score Rationale"] = "word " * 51
+    row["Score Rationale"] = "word " * 201
 
     errors = validate_output_row(row, "sde3")
 
     assert any("Date-Quality Warning must be one of" in error for error in errors)
     assert any("Strongest Evidence has more than three items" in error for error in errors)
-    assert any("no longer than 50 words" in error for error in errors)
+    assert any("no longer than 200 words" in error for error in errors)
+
+
+def test_validation_requires_all_rationale_sections_in_order() -> None:
+    missing = _calculated_row()
+    missing["Score Rationale"] = missing["Score Rationale"].replace(
+        "FastAPI / Django:", "Framework experience:"
+    )
+    assert any(
+        "must cover all required sections" in error for error in validate_output_row(missing, "sde3")
+    )
+
+    out_of_order = _calculated_row()
+    out_of_order["Score Rationale"] = (
+        "FastAPI / Django: Current experience supports the framework. "
+        "Shipped AI Agent / Agent-Chatbot Delivery: Current experience supports delivery. "
+        "Backend / System Architecture: Current experience supports backend work. "
+        "AI Solution Breadth & Judgment: Current experience supports applied AI work. "
+        "Overall: Evidence is current but duration is limited."
+    )
+    assert any(
+        "sections must appear in the required order" in error
+        for error in validate_output_row(out_of_order, "sde3")
+    )
+
+
+def test_validation_accepts_detailed_rationale_above_old_limit() -> None:
+    row = _calculated_row()
+    assert len(row["Score Rationale"].split()) > 50
+    assert validate_output_row(row, "sde3") == []
 
 
 def test_ranking_uses_sde3_capability_order_then_candidate_name() -> None:

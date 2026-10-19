@@ -30,6 +30,10 @@ Missing LinkedIn information receives zero where evidence is required, but must 
 4. One achievement may support multiple capabilities only when it explicitly demonstrates each capability.
 5. Score only based on written evidence.
 6. Do not add undocumented bonuses, penalties, pass scores, or rejection rules.
+7. In Score Rationale, provide a subjective, evidence-based explanation for all four capability scores in this order: Shipped AI Agent / Agent-Chatbot Delivery, FastAPI / Django, Backend / System Architecture, and AI Solution Breadth & Judgment.
+8. For each capability, explain the candidate's relevant work, where the evidence appears, how the recency and supported duration affected the score, and what missing or unclear evidence prevented a higher score.
+9. Do not treat a list of Evidence, Recency, or Duration point values as justification. Explain in natural language why the available evidence supports the resulting score.
+10. End Score Rationale with a brief overall conclusion explaining the main reasons for the candidate's Final Score.
 
 ## 2. Fields to Use
 
@@ -308,7 +312,7 @@ State the most important uncertainties neutrally, especially shipment status, Fa
 
 ### Score Rationale
 
-Maximum 50 words. Explain the strongest supported capabilities and most important uncertainty without repeating every score.
+Maximum 200 words. Use one concise narrative with clearly identifiable explanations for all four capabilities in the required order: Shipped AI Agent / Agent-Chatbot Delivery, FastAPI / Django, Backend / System Architecture, and AI Solution Breadth & Judgment. For each capability, explain the candidate's relevant work and its source, how recency and supported duration affected the score, and what evidence was missing or unclear when the score was reduced. End with a brief overall conclusion explaining the main reasons for the Final Score. Do not merely repeat Evidence, Recency, or Duration point values, and do not calculate or repeat the mechanical score fields.
 
 ## 13. Deterministic Edge Rules
 

@@ -60,6 +60,7 @@ class RoleProfile:
     strongest_evidence_columns: Optional[list[str]] = None
     rationale_min_words: int = 0
     rationale_max_words: int = 75
+    rationale_required_sections: Optional[list[str]] = None
     evidence_sources: Optional[list[str]] = None
     require_experience: bool = False
     skip_if_no_evidence: bool = True
@@ -745,7 +746,9 @@ ROLE_PROFILES = {
             "Judge Recency separately for each capability; an unrelated current role does not make older capability evidence recent.",
             "Use the strongest valid source once, do not stack repeated mentions, and do not infer personal work from an employer, title, framework keyword, or team outcome.",
             "Warnings do not change the score, and missing evidence must be described neutrally as unverified or not stated.",
-            "Return no more than three material Strongest Evidence points separated by ' | ' and keep Score Rationale to 50 words or fewer.",
+            "Return no more than three material Strongest Evidence points separated by ' | '.",
+            "Write Score Rationale as one evidence-based narrative of no more than 200 words using these section labels in exactly this order: Shipped AI Agent / Agent-Chatbot Delivery:, FastAPI / Django:, Backend / System Architecture:, AI Solution Breadth & Judgment:, Overall:.",
+            "For each capability, explain the candidate's relevant work and its source, how recency and supported duration affected the result, and what missing or unclear evidence prevented a higher score. Do not merely list component-point values or calculate or repeat the mechanical score fields.",
         ],
         internal_role_flag_name="relevant_sde3_role",
         internal_role_evidence_name="sde3_evidence_extracted",
@@ -756,7 +759,14 @@ ROLE_PROFILES = {
         ranking_tiebreaker_columns=list(SDE3_CATEGORY_SCORES),
         strongest_evidence_columns=["Strongest Evidence"],
         rationale_min_words=0,
-        rationale_max_words=50,
+        rationale_max_words=200,
+        rationale_required_sections=[
+            "Shipped AI Agent / Agent-Chatbot Delivery:",
+            "FastAPI / Django:",
+            "Backend / System Architecture:",
+            "AI Solution Breadth & Judgment:",
+            "Overall:",
+        ],
         evidence_sources=["Headline", "About", "All experiences", "Projects"],
         require_experience=False,
         skip_if_no_evidence=False,

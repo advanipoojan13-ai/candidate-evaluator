@@ -42,6 +42,29 @@ def test_preview_includes_every_experience_index() -> None:
     assert "experience/3" not in preview[0]
 
 
+def test_duplicate_profile_ids_receive_independent_internal_ids() -> None:
+    profile = {
+        "publicIdentifier": "duplicate-person",
+        "linkedinUrl": "https://www.linkedin.com/in/duplicate-person/",
+        "fullName": "Duplicate Person",
+    }
+
+    candidates = normalize_candidates([profile, profile, profile])
+
+    assert [candidate["linkedin_profile_id"] for candidate in candidates] == [
+        "duplicate-person",
+        "duplicate-person--duplicate-2",
+        "duplicate-person--duplicate-3",
+    ]
+    assert {candidate["source_row"]["LinkedIn Profile ID"] for candidate in candidates} == {
+        "duplicate-person"
+    }
+
+    colliding_suffix = {**profile, "publicIdentifier": "duplicate-person--duplicate-2"}
+    candidates = normalize_candidates([profile, profile, colliding_suffix])
+    assert len({candidate["linkedin_profile_id"] for candidate in candidates}) == 3
+
+
 def test_model_selector_options_include_default_and_thinking() -> None:
     assert MODEL_OPTIONS["GPT-5.5"] == "gpt-5.5"
     assert MODEL_OPTIONS["GPT-5.5 Thinking"] == "gpt-5.5-thinking"

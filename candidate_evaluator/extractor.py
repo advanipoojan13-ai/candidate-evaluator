@@ -77,7 +77,24 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def normalize_candidates(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [normalize_candidate(profile, index) for index, profile in enumerate(profiles)]
+    candidates = [normalize_candidate(profile, index) for index, profile in enumerate(profiles)]
+    used_ids: set[str] = set()
+    next_suffix: dict[str, int] = {}
+    for candidate in candidates:
+        candidate_id = str(candidate["linkedin_profile_id"])
+        unique_id = candidate_id
+        if unique_id in used_ids:
+            suffix = next_suffix.get(candidate_id, 2)
+            unique_id = f"{candidate_id}--duplicate-{suffix}"
+            while unique_id in used_ids:
+                suffix += 1
+                unique_id = f"{candidate_id}--duplicate-{suffix}"
+            next_suffix[candidate_id] = suffix + 1
+        used_ids.add(unique_id)
+        # Progress and result files are keyed by candidate ID. Keep duplicate
+        # source profiles independent without changing the original source row.
+        candidate["linkedin_profile_id"] = unique_id
+    return candidates
 
 
 def build_source_row(candidate: dict[str, Any]) -> dict[str, str]:

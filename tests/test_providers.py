@@ -150,6 +150,29 @@ def test_deepseek_reports_output_limit_instead_of_generic_empty_response(monkeyp
         )
 
 
+def test_deepseek_rejects_nonempty_but_truncated_output(monkeypatch) -> None:
+    response = SimpleNamespace(
+        output_text='{"evaluations": [{"candidate_number": 1',
+        status="incomplete",
+        incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+    )
+    client = _FakeClient(_batch_response({}))
+    client.responses = _FakeEndpoint(response)
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **_kwargs: client)
+
+    with pytest.raises(ModelOutputFormatError, match="full output allowance"):
+        evaluate_candidate(
+            api_key="deepseek-key",
+            provider_key=DEEPSEEK_PROVIDER_KEY,
+            model="deepseek-flash",
+            reasoning_effort="none",
+            rubric_text="A rubric",
+            candidate=_candidate(),
+            role_profile=get_role_profile("sde3"),
+            max_retries=0,
+        )
+
+
 def test_openai_keeps_strict_chat_completions_transport(monkeypatch) -> None:
     clients: list[tuple[dict, _FakeClient]] = []
 

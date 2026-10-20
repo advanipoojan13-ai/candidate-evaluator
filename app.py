@@ -705,8 +705,6 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
 
     message.success("Evaluation pass finished.")
     _render_live_status(run_id, dashboard, preview, summary, run_finished=True, parallel_calls=max_workers)
-
-
 def _submit_candidate_batch(
     executor: ThreadPoolExecutor,
     active: dict[Any, list[dict[str, Any]]],
@@ -763,27 +761,37 @@ def _evaluate_candidate_batch_for_run(
             elapsed = batch_elapsed / len(group)
             results = []
             for candidate, (grading, raw) in zip(group, evaluations):
-                role_source = {
-                    **candidate["source_row"],
-                    "Candidate": candidate.get("candidate_name", ""),
-                    "Profile URL": candidate.get("linkedin_url", ""),
-                    "Rank Number": "",
-                }
-                row = apply_calculated_fields({**role_source, **grading}, candidate, role)
-                row = coerce_fixed_row(row, role)
-                errors = validate_output_row(row, role)
-                if errors:
+                try:
+                    role_source = {
+                        **candidate["source_row"],
+                        "Candidate": candidate.get("candidate_name", ""),
+                        "Profile URL": candidate.get("linkedin_url", ""),
+                        "Rank Number": "",
+                    }
+                    row = apply_calculated_fields({**role_source, **grading}, candidate, role)
+                    row = coerce_fixed_row(row, role)
+                    errors = validate_output_row(row, role)
+                    if errors:
+                        results.append(
+                            {
+                                "state": "failed",
+                                "error": "Evaluation failed after the API call because the grading output was incomplete or invalid: "
+                                + "; ".join(errors),
+                                "raw": raw,
+                                "elapsed_seconds": elapsed,
+                            }
+                        )
+                    else:
+                        results.append({"state": "completed", "row": row, "raw": raw, "elapsed_seconds": elapsed})
+                except Exception as exc:
                     results.append(
                         {
-                            "state": "skipped",
-                            "error": "Skipped after API call because the grading output was incomplete or invalid: "
-                            + "; ".join(errors),
+                            "state": "failed",
+                            "error": f"Evaluation failed after the API call while processing the candidate output: {exc}",
                             "raw": raw,
                             "elapsed_seconds": elapsed,
                         }
                     )
-                else:
-                    results.append({"state": "completed", "row": row, "raw": raw, "elapsed_seconds": elapsed})
             return {"results": results, "usage": evaluations.usage}
         except ModelOutputFormatError as exc:
             failed_elapsed = time.monotonic() - started
@@ -801,8 +809,8 @@ def _evaluate_candidate_batch_for_run(
                 }
             raw_content = getattr(exc, "raw_content", "")
             result = {
-                "state": "skipped",
-                "error": f"Skipped after API call because the candidate output was empty, incomplete, or unreadable: {exc}",
+                "state": "failed",
+                "error": f"Evaluation failed after the API call because the candidate output was empty, incomplete, or unreadable: {exc}",
                 "raw": {"unparsed_content": raw_content} if raw_content else {},
                 "elapsed_seconds": failed_elapsed,
             }
@@ -812,8 +820,8 @@ def _evaluate_candidate_batch_for_run(
             }
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             result = {
-                "state": "skipped",
-                "error": f"Skipped after API call because the grading output was incomplete or unreadable: {exc}",
+                "state": "failed",
+                "error": f"Evaluation failed after the API call because the grading output was incomplete or unreadable: {exc}",
                 "raw": {},
                 "elapsed_seconds": time.monotonic() - started,
             }
@@ -874,8 +882,8 @@ def _evaluate_candidate_for_run(
         errors = validate_output_row(row, role)
         if errors:
             return {
-                "state": "skipped",
-                "error": "Skipped after API call because the grading output was incomplete or invalid: "
+                "state": "failed",
+                "error": "Evaluation failed after the API call because the grading output was incomplete or invalid: "
                 + "; ".join(errors),
                 "raw": raw,
                 "elapsed_seconds": time.monotonic() - started,
@@ -884,8 +892,8 @@ def _evaluate_candidate_for_run(
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raw_content = getattr(exc, "raw_content", "")
         return {
-            "state": "skipped",
-            "error": f"Skipped after API call because the grading output was empty or unreadable: {exc}",
+            "state": "failed",
+            "error": f"Evaluation failed after the API call because the grading output was empty or unreadable: {exc}",
             "raw": {"unparsed_content": raw_content} if raw_content else {},
             "elapsed_seconds": time.monotonic() - started,
         }

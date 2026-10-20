@@ -6,7 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app import _default_rubric_path, _evaluate_candidate_batch_for_run, _evaluate_candidate_for_run
+from app import (
+    _default_rubric_path,
+    _evaluate_candidate_batch_for_run,
+    _evaluate_candidate_for_run,
+)
 from candidate_evaluator.extractor import candidate_input_issue, normalize_candidate
 from candidate_evaluator.openai_scoring import (
     ModelOutputFormatError,
@@ -109,14 +113,12 @@ def test_sde3_is_a_dedicated_selectable_role_with_bundled_rubric() -> None:
     assert sum(role.category_scores.values()) == 62
     assert len(role.component_score_maxima) == 12
     assert set(role.component_score_maxima).isdisjoint(role.output_columns)
-    assert role.rationale_max_words == 200
-    assert role.rationale_required_sections == [
-        "Shipped AI Agent / Agent-Chatbot Delivery:",
-        "FastAPI / Django:",
-        "Backend / System Architecture:",
-        "AI Solution Breadth & Judgment:",
-    ]
-    assert any("no more than 200 words" in instruction for instruction in role.instructions)
+    assert role.rationale_max_words == 250
+    assert role.rationale_required_sections is None
+    assert role.enforce_rationale_word_limit is False
+    assert role.enforce_rationale_sections is False
+    assert any("no more than 250 words" in instruction for instruction in role.instructions)
+    assert any("without required headings" in instruction for instruction in role.instructions)
     assert Path(_default_rubric_path("sde3")).name == "sde3.md"
     assert Path(_default_rubric_path("sde3")).is_file()
 
@@ -200,7 +202,7 @@ def test_validation_rejects_missing_fractional_and_out_of_range_components() -> 
     assert any("must be between 0 and 3" in error for error in validate_output_row(excessive, "sde3"))
 
 
-def test_validation_enforces_warnings_evidence_count_and_rationale_limit() -> None:
+def test_validation_enforces_structured_fields_but_treats_rationale_length_as_guidance() -> None:
     row = _calculated_row()
     row["Date-Quality Warning"] = "Maybe"
     row["Strongest Evidence"] = "One | Two | Three | Four"
@@ -210,17 +212,15 @@ def test_validation_enforces_warnings_evidence_count_and_rationale_limit() -> No
 
     assert any("Date-Quality Warning must be one of" in error for error in errors)
     assert any("Strongest Evidence has more than three items" in error for error in errors)
-    assert any("no longer than 200 words" in error for error in errors)
+    assert not any("Score Rationale" in error for error in errors)
 
 
-def test_validation_requires_all_rationale_sections_in_order() -> None:
+def test_validation_accepts_rationale_heading_variations_and_order() -> None:
     missing = _calculated_row()
     missing["Score Rationale"] = missing["Score Rationale"].replace(
         "FastAPI / Django:", "Framework experience:"
     )
-    assert any(
-        "must cover all required sections" in error for error in validate_output_row(missing, "sde3")
-    )
+    assert validate_output_row(missing, "sde3") == []
 
     out_of_order = _calculated_row()
     out_of_order["Score Rationale"] = (
@@ -230,10 +230,21 @@ def test_validation_requires_all_rationale_sections_in_order() -> None:
         "AI Solution Breadth & Judgment: Current experience supports applied AI work. "
         "Overall: Evidence is current but duration is limited."
     )
-    assert any(
-        "sections must appear in the required order" in error
-        for error in validate_output_row(out_of_order, "sde3")
-    )
+    assert validate_output_row(out_of_order, "sde3") == []
+
+
+def test_validation_accepts_rationale_above_250_words_without_losing_valid_scores() -> None:
+    row = _calculated_row()
+    row["Score Rationale"] = "evidence " * 300
+
+    assert validate_output_row(row, "sde3") == []
+
+
+def test_validation_does_not_reject_an_empty_rationale() -> None:
+    row = _calculated_row()
+    row["Score Rationale"] = ""
+
+    assert validate_output_row(row, "sde3") == []
 
 
 def test_validation_accepts_detailed_rationale_above_old_limit() -> None:
@@ -412,7 +423,7 @@ def test_sde3_batch_uses_one_ai_request_with_cleaned_candidates(mock_openai) -> 
         assert set(sent["experiences"][0]) <= set(role.experience_fields)
 
 
-def test_sde3_unreadable_deepseek_batch_is_not_resent_or_split(monkeypatch) -> None:
+def test_sde3_unreadable_deepseek_batch_is_retryable_and_not_resent_or_split(monkeypatch) -> None:
     calls = 0
 
     def unreadable_batch(**_kwargs):
@@ -435,11 +446,11 @@ def test_sde3_unreadable_deepseek_batch_is_not_resent_or_split(monkeypatch) -> N
     )
 
     assert calls == 1
-    assert [item["state"] for item in result["results"]] == ["skipped", "skipped"]
+    assert [item["state"] for item in result["results"]] == ["failed", "failed"]
     assert result["usage"]["api_calls"] == 1
 
 
-def test_full_flow_completes_valid_output_skips_invalid_output_and_marks_request_failure(monkeypatch) -> None:
+def test_full_flow_completes_valid_output_and_marks_invalid_or_request_output_failed(monkeypatch) -> None:
     role = get_role_profile("sde3")
     grading = _model_grading()
 
@@ -457,9 +468,9 @@ def test_full_flow_completes_valid_output_skips_invalid_output_and_marks_request
         return invalid, {"grading": invalid}
 
     monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", invalid_evaluation)
-    skipped = _evaluate_candidate_for_run("key", "model", "rubric", _candidate(), role)
-    assert skipped["state"] == "skipped"
-    assert "incomplete or invalid" in skipped["error"]
+    failed = _evaluate_candidate_for_run("key", "model", "rubric", _candidate(), role)
+    assert failed["state"] == "failed"
+    assert "incomplete or invalid" in failed["error"]
 
     def failed_evaluation(**_kwargs):
         raise RuntimeError("provider unavailable")

@@ -88,7 +88,7 @@ def test_deepseek_split_isolates_a_candidate_that_still_cannot_complete(monkeypa
         "max",
     )
 
-    assert [item["state"] for item in result["results"]] == ["completed", "skipped"]
+    assert [item["state"] for item in result["results"]] == ["completed", "failed"]
     assert "candidate output" in result["results"][1]["error"]
     assert result["usage"]["api_calls"] == 3
 
@@ -113,4 +113,36 @@ def test_openai_format_failure_is_not_split(monkeypatch) -> None:
     )
 
     assert calls == [2]
-    assert [item["state"] for item in result["results"]] == ["skipped", "skipped"]
+    assert [item["state"] for item in result["results"]] == ["failed", "failed"]
+
+
+def test_candidate_processing_failure_does_not_discard_other_batch_results(monkeypatch) -> None:
+    evaluations = BatchEvaluationResults(
+        [
+            ({"Total Score": 1}, {"candidate_number": 1}),
+            ({"Total Score": "bad"}, {"candidate_number": 2}),
+        ],
+        _usage(),
+    )
+    monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidates", lambda **_kwargs: evaluations)
+    monkeypatch.setattr(app, "apply_calculated_fields", lambda row, _candidate, _role: row)
+    monkeypatch.setattr(app, "validate_output_row", lambda _row, _role: [])
+
+    def coerce(row, _role):
+        if row.get("Total Score") == "bad":
+            raise ValueError("invalid numeric field")
+        return row
+
+    monkeypatch.setattr(app, "coerce_fixed_row", coerce)
+    result = app._evaluate_candidate_batch_for_run(
+        "key",
+        "deepseek-flash",
+        "rubric",
+        [_candidate(1), _candidate(2)],
+        get_role_profile("design"),
+        DEEPSEEK_PROVIDER_KEY,
+        "none",
+    )
+
+    assert [item["state"] for item in result["results"]] == ["completed", "failed"]
+    assert "invalid numeric field" in result["results"][1]["error"]

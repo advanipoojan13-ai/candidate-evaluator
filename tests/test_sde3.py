@@ -115,7 +115,6 @@ def test_sde3_is_a_dedicated_selectable_role_with_bundled_rubric() -> None:
         "FastAPI / Django:",
         "Backend / System Architecture:",
         "AI Solution Breadth & Judgment:",
-        "Overall:",
     ]
     assert any("no more than 200 words" in instruction for instruction in role.instructions)
     assert Path(_default_rubric_path("sde3")).name == "sde3.md"
@@ -240,6 +239,15 @@ def test_validation_requires_all_rationale_sections_in_order() -> None:
 def test_validation_accepts_detailed_rationale_above_old_limit() -> None:
     row = _calculated_row()
     assert len(row["Score Rationale"].split()) > 50
+    assert validate_output_row(row, "sde3") == []
+
+
+def test_validation_accepts_overall_conclusion_without_exact_heading() -> None:
+    row = _calculated_row()
+    row["Score Rationale"] = row["Score Rationale"].replace(
+        "Overall:", "In summary,"
+    )
+
     assert validate_output_row(row, "sde3") == []
 
 

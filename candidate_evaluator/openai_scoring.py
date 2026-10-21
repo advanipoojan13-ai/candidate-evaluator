@@ -282,19 +282,23 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
         content = getattr(response, "output_text", "") or ""
     else:
         content = response.choices[0].message.content or ""
-    if not content.strip():
-        status = _field(response, "status")
-        incomplete_reason = _field(_field(response, "incomplete_details"), "reason")
-        error = _field(response, "error")
-        error_message = _field(error, "message")
+    status = _field(response, "status")
+    incomplete_reason = _field(_field(response, "incomplete_details"), "reason")
+    error = _field(response, "error")
+    error_message = _field(error, "message")
+    if status == "incomplete" or incomplete_reason:
         if incomplete_reason == "max_output_tokens":
             raise ValueError(
                 f"{provider.label} used the full output allowance before producing the final JSON."
             )
         if incomplete_reason == "content_filter":
             raise ValueError(f"{provider.label} stopped the response because of its content filter.")
-        if status == "failed" and error_message:
-            raise ValueError(f"{provider.label} response failed: {error_message}")
+        reason_note = f": {incomplete_reason}" if incomplete_reason else ""
+        raise ValueError(f"{provider.label} returned an incomplete response{reason_note}.")
+    if status == "failed":
+        detail = f": {error_message}" if error_message else "."
+        raise ValueError(f"{provider.label} response failed{detail}")
+    if not content.strip():
         status_note = f" (response status: {status})" if status else ""
         raise ValueError(f"{provider.label} returned an empty response{status_note}.")
     return content

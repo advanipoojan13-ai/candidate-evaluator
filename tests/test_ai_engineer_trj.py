@@ -139,7 +139,7 @@ def test_ai_engineer_full_evaluation_flow_recalculates_incorrect_total(monkeypat
     assert result["row"]["Final Score (/100)"] == 78
 
 
-def test_ai_engineer_unreadable_output_is_skipped_and_preserved(monkeypatch) -> None:
+def test_ai_engineer_unreadable_output_is_failed_and_preserved_for_retry(monkeypatch) -> None:
     malformed = '{"grading": {"Final Score (/100)": 80,}}'
 
     def fake_evaluate_candidate(**_kwargs):
@@ -163,7 +163,7 @@ def test_ai_engineer_unreadable_output_is_skipped_and_preserved(monkeypatch) -> 
         reasoning_effort="high",
     )
 
-    assert result["state"] == "skipped"
+    assert result["state"] == "failed"
     assert result["raw"] == {"unparsed_content": malformed}
     assert "malformed JSON" in result["error"]
 

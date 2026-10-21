@@ -72,11 +72,16 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
     rationale = str(row.get("Score Rationale", "") or "")
     rationale_words = _word_count(rationale)
     if role.rationale_min_words and rationale_words < role.rationale_min_words:
-        errors.append(f"Score Rationale must be at least {role.rationale_min_words} words; got {rationale_words}.")
-    if role.rationale_max_words and rationale_words > role.rationale_max_words:
+        unit = "word" if role.rationale_min_words == 1 else "words"
+        errors.append(f"Score Rationale must be at least {role.rationale_min_words} {unit}; got {rationale_words}.")
+    if (
+        role.enforce_rationale_word_limit
+        and role.rationale_max_words
+        and rationale_words > role.rationale_max_words
+    ):
         errors.append(f"Score Rationale must be no longer than {role.rationale_max_words} words; got {rationale_words}.")
 
-    required_sections = role.rationale_required_sections or []
+    required_sections = role.rationale_required_sections if role.enforce_rationale_sections else []
     if required_sections:
         folded_rationale = rationale.casefold()
         section_positions = [folded_rationale.find(section.casefold()) for section in required_sections]

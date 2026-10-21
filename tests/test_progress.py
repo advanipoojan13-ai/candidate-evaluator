@@ -272,6 +272,55 @@ def test_batch_results_and_usage_are_committed_together(tmp_path: Path, monkeypa
     ]
 
 
+def test_failed_model_output_can_be_retried_to_completion(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidate = {
+        "source_index": 0,
+        "linkedin_profile_id": "a",
+        "source_row": {"Candidate Name": "A"},
+    }
+    init_run("run-retryable", [candidate], "rubric", "model")
+    commit_batch_results(
+        "run-retryable",
+        [candidate],
+        {
+            "usage": _batch_usage(),
+            "results": [
+                {
+                    "state": "failed",
+                    "error": "Incomplete model output",
+                    "raw": {"unparsed_content": "partial"},
+                    "elapsed_seconds": 1,
+                }
+            ],
+        },
+    )
+
+    assert progress_counts("run-retryable")["failed"] == 1
+    assert progress_counts("run-retryable")["skipped"] == 0
+
+    commit_batch_results(
+        "run-retryable",
+        [candidate],
+        {
+            "usage": _batch_usage(),
+            "results": [
+                {
+                    "state": "completed",
+                    "row": {"Candidate Name": "A", "Total Score": 10},
+                    "raw": {"candidate_number": 1},
+                    "elapsed_seconds": 1,
+                }
+            ],
+        },
+    )
+
+    counts = progress_counts("run-retryable")
+    assert counts["completed"] == 1
+    assert counts["failed"] == 0
+    assert result_rows("run-retryable") == [{"Candidate Name": "A", "Total Score": 10}]
+
+
 def test_staged_batch_is_recovered_after_interruption_without_double_charging(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     candidates = [

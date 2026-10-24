@@ -353,6 +353,7 @@ def test_payload_is_cleaned_merged_and_filtered_before_ai() -> None:
         "is_current",
         "duration",
         "experience_skills",
+        "calculated_dates",
     }
     assert payload["Projects"] == [
         {"name": "Agent", "description": "Deployed agent", "technologies": ["LangGraph"]}
@@ -392,7 +393,7 @@ def test_sparse_valid_profiles_continue_but_invalid_identity_and_post_urls_skip(
 
 
 @patch("candidate_evaluator.openai_scoring.OpenAI")
-def test_sde3_batch_uses_one_ai_request_with_cleaned_candidates(mock_openai) -> None:
+def test_sde3_batch_scores_before_requesting_explanations(mock_openai) -> None:
     role = get_role_profile("sde3")
     evaluations = [
         {"candidate_number": number, "grading": _model_grading()}
@@ -415,12 +416,14 @@ def test_sde3_batch_uses_one_ai_request_with_cleaned_candidates(mock_openai) -> 
 
     assert len(results) == 2
     mock_openai.assert_called_once_with(api_key="test-key", max_retries=0)
-    create.assert_called_once()
-    request_payload = json.loads(create.call_args.kwargs["messages"][1]["content"])
+    assert create.call_count == 2
+    request_payload = json.loads(create.call_args_list[0].kwargs["messages"][1]["content"])
     for item in request_payload["candidates"]:
         sent = item["candidate"]
         assert "Location" not in sent and "Education" not in sent and "Skills" not in sent
-        assert set(sent["experiences"][0]) <= set(role.experience_fields)
+        assert set(sent["experiences"][0]) <= {*role.experience_fields, "calculated_dates"}
+    explanations = json.loads(create.call_args_list[1].kwargs["messages"][1]["content"])
+    assert explanations["candidates"][0]["fixed_scores"]["Final Score (/62)"] == 37.2
 
 
 def test_sde3_unreadable_deepseek_batch_is_retryable_and_not_resent_or_split(monkeypatch) -> None:

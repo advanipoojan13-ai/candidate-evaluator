@@ -79,13 +79,27 @@ def evaluate_candidates(
 
     provider = get_provider(provider_key)
     role = role_profile or get_role_profile(role_key)
-    # SDE3 is intentionally single-pass: a candidate batch is sent once and
-    # invalid output is handled locally instead of resending candidate data.
+    # SDE3 owns bounded score-format recovery and generates explanations only
+    # after the numeric evaluation has been validated and calculated.
     client_retries = 0 if role.key == "sde3" else max_retries
     client_kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": client_retries}
     if provider.base_url:
         client_kwargs["base_url"] = provider.base_url
     client = OpenAI(**client_kwargs)
+    if role.key == "sde3":
+        from .sde3_scoring import evaluate_sde3_candidates
+
+        return evaluate_sde3_candidates(
+            candidates=candidates,
+            payloads=[_candidate_payload(candidate, role) for candidate in candidates],
+            role=role,
+            rubric_text=rubric_text,
+            provider=provider,
+            request=lambda prompt, payload, schema, name: _structured_response(
+                client, provider, model, reasoning_effort, prompt,
+                json.dumps(payload, ensure_ascii=False), schema, name,
+            ),
+        )
     response = _create_response(client, provider, model, rubric_text, candidates, role, reasoning_effort)
     usage = _response_usage(response)
 
@@ -234,6 +248,22 @@ def _create_response(
         ensure_ascii=False,
     )
     schema = _batch_response_schema(role)
+    return _structured_response(
+        client, provider, model, reasoning_effort, fixed_prompt, request_input,
+        schema, "candidate_evaluation_batch",
+    )
+
+
+def _structured_response(
+    client: OpenAI,
+    provider: ProviderProfile,
+    model: str,
+    reasoning_effort: str,
+    fixed_prompt: str,
+    request_input: str,
+    schema: dict[str, Any],
+    schema_name: str,
+) -> Any:
     if provider.transport == "responses":
         return client.responses.create(
             model=model,
@@ -244,7 +274,7 @@ def _create_response(
             text={
                 "format": {
                     "type": "json_schema",
-                    "name": "candidate_evaluation_batch",
+                    "name": schema_name,
                     "schema": schema,
                 }
             },
@@ -258,7 +288,7 @@ def _create_response(
         response_format={
             "type": "json_schema",
             "json_schema": {
-                "name": "candidate_evaluation_batch",
+                "name": schema_name,
                 "strict": True,
                 "schema": schema,
             },
@@ -282,6 +312,9 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
         content = getattr(response, "output_text", "") or ""
     else:
         content = response.choices[0].message.content or ""
+        finish_reason = _field(response.choices[0], "finish_reason")
+        if finish_reason in {"length", "content_filter"}:
+            raise ValueError(f"{provider.label} returned an incomplete response (finish_reason={finish_reason}).")
     status = _field(response, "status")
     incomplete_reason = _field(_field(response, "incomplete_details"), "reason")
     error = _field(response, "error")
@@ -335,6 +368,10 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
             {field: experience.get(field) for field in role.experience_fields if field in experience}
             for experience in filtered_payload["experiences"]
         ]
+    if role.key == "sde3" and filtered_payload.get("experiences"):
+        from .dates import prepare_experience_dates
+
+        filtered_payload["experiences"] = prepare_experience_dates(filtered_payload["experiences"], date.today())
     return filtered_payload
 
 
@@ -342,15 +379,20 @@ def _system_prompt(role: RoleProfile) -> str:
     return f"{role.system_prompt} Evaluation date: {date.today().isoformat()}."
 
 
-def _fixed_prompt(role: RoleProfile, rubric_text: str) -> str:
+def _fixed_prompt(role: RoleProfile, rubric_text: str, *, preserve_candidate_numbers: bool = False) -> str:
     role_instructions = "\n".join(f"- {instruction}" for instruction in role.instructions)
+    numbering_rule = (
+        "- Return exactly one evaluation per candidate, preserving the supplied candidate_number values, including during individual recovery.\n"
+        if preserve_candidate_numbers else
+        "- Return exactly one evaluation per candidate, in the supplied order, using consecutive candidate_number values starting at 1.\n"
+    )
     prompt = (
         f"{_system_prompt(role)}\n\n"
         "UNIVERSAL EVALUATION RULES\n"
         "- Apply the supplied rubric using only the supplied candidate evidence; do not use external information or invent missing facts.\n"
         "- Ignore profile-platform metadata such as images, logos, followers, connections, internal IDs, and scraper metadata if present.\n"
         "- Evaluate every candidate independently; do not compare candidates with one another.\n"
-        "- Return exactly one evaluation per candidate, in the supplied order, using consecutive candidate_number values starting at 1.\n"
+        f"{numbering_rule}"
         "- Return only fields required by the JSON schema."
     )
     if role_instructions:

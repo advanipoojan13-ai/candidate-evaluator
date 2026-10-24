@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from .roles import RoleProfile, get_role_profile
@@ -112,10 +114,12 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
     )
     for column in numeric_columns:
         if fixed[column] != "":
-            if column in role.component_score_maxima:
-                fixed[column] = int(fixed[column])
-            else:
-                fixed[column] = float(fixed[column]) if role.numeric_scores else int(fixed[column])
+            errors: list[str] = []
+            integer_only = column in role.component_score_maxima or not role.numeric_scores
+            number = _as_number(fixed[column], column, errors, integer_only=integer_only)
+            if errors:
+                raise ValueError(errors[0])
+            fixed[column] = number
     evidence_columns = role.strongest_evidence_columns or [f"Strongest Evidence {i}" for i in range(1, 4)]
     if len(evidence_columns) == 1:
         column = evidence_columns[0]
@@ -138,14 +142,17 @@ def apply_calculated_fields(
         component_values = [calculated.get(column) for column in rule.columns]
         if all(_is_number(value) for value in component_values):
             raw_score = sum(float(value) for value in component_values)
-            calculated[category_column] = round(raw_score * rule.multiplier, 10)
+            weighted_score = raw_score * rule.multiplier
+            if math.isfinite(weighted_score):
+                calculated[category_column] = round(weighted_score, 10)
 
     scores = [calculated.get(column) for column in role.category_scores]
     if all(_is_number(score) for score in scores):
         total = round(sum(float(score) for score in scores), 10)
-        calculated[role.total_column] = total if role.numeric_scores else int(total)
-        if role.outcome_bands:
-            calculated[role.outcome_column] = expected_outcome(total, role)
+        if math.isfinite(total):
+            calculated[role.total_column] = total if role.numeric_scores else int(total)
+            if role.outcome_bands:
+                calculated[role.outcome_column] = expected_outcome(total, role)
 
     for column in role.grading_columns:
         if not column.endswith("— Years and Months"):
@@ -175,10 +182,19 @@ def _as_int(value: Any, name: str, errors: list[str]) -> Optional[int]:
         if isinstance(value, bool):
             raise ValueError
         number = float(value)
-        if not number.is_integer():
+        if not math.isfinite(number) or not number.is_integer():
             raise ValueError
+        if isinstance(value, str):
+            # Legacy numeric strings are accepted only when their exact value is
+            # integral; float conversion can round a small fraction into an int.
+            exact = Decimal(value)
+            if exact != exact.to_integral_value():
+                raise ValueError
+            return int(exact)
+        if isinstance(value, int):
+            return value
         return int(number)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, InvalidOperation):
         errors.append(f"{name} must be a whole number; got {value!r}.")
         return None
 
@@ -189,8 +205,11 @@ def _as_number(value: Any, name: str, errors: list[str], integer_only: bool) -> 
     try:
         if isinstance(value, bool):
             raise ValueError
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError
+        return number
+    except (TypeError, ValueError, OverflowError):
         errors.append(f"{name} must be a number; got {value!r}.")
         return None
 
@@ -200,7 +219,12 @@ def _numbers_equal(left: float, right: float) -> bool:
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _format_years_and_months(total_months: int) -> str:

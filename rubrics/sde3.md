@@ -20,6 +20,8 @@ For every capability, the AI returns:
 
 The application calculates weighted capability scores, the Final Score, and rank. The AI must **not calculate or return these mechanical fields**.
 
+The application first normalises available experience dates and role durations. These calculated role durations are inputs and upper bounds, not automatic evidence of capability-specific use. The scoring request returns component judgments without Score Rationale. After component validation and Python score calculation, a separate request receives the fixed scores and permitted evidence to write Score Rationale. Explanation output cannot change scores.
+
 Missing LinkedIn information receives zero where evidence is required, but must be described as **unverified** or **not stated**. Missing information is not proof that the candidate lacks the capability.
 
 ## 1. Global Scoring Rules

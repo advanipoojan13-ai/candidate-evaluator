@@ -657,6 +657,11 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
         f"with up to {BATCH_SIZE} candidates per call. "
         f"Skipped {skipped_in_pass} unusable profile(s) without an API call."
     )
+    if role.key == "sde3":
+        message.info(
+            "SDE3 calculates date and duration inputs first, evaluates the rubric, then writes explanations "
+            "from validated scores. Missing score decisions receive one individual recovery attempt."
+        )
     _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -762,6 +767,8 @@ def _evaluate_candidate_batch_for_run(
             results = []
             for candidate, (grading, raw) in zip(group, evaluations):
                 try:
+                    if raw.get("evaluation_error"):
+                        raise ValueError(raw["evaluation_error"])
                     role_source = {
                         **candidate["source_row"],
                         "Candidate": candidate.get("candidate_name", ""),
@@ -859,6 +866,7 @@ def _evaluate_candidate_for_run(
     import time
 
     started = time.monotonic()
+    raw: dict[str, Any] = {}
     try:
         from candidate_evaluator.openai_scoring import evaluate_candidate
 
@@ -871,6 +879,8 @@ def _evaluate_candidate_for_run(
             candidate=candidate,
             role_profile=role,
         )
+        if raw.get("evaluation_error"):
+            raise ValueError(raw["evaluation_error"])
         role_source = {
             **candidate["source_row"],
             "Candidate": candidate.get("candidate_name", ""),
@@ -894,7 +904,7 @@ def _evaluate_candidate_for_run(
         return {
             "state": "failed",
             "error": f"Evaluation failed after the API call because the grading output was empty or unreadable: {exc}",
-            "raw": {"unparsed_content": raw_content} if raw_content else {},
+            "raw": {"unparsed_content": raw_content} if raw_content else raw,
             "elapsed_seconds": time.monotonic() - started,
         }
     except Exception as exc:

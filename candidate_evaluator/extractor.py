@@ -241,7 +241,11 @@ def _normalize_experience(exp: dict[str, Any], index: int) -> dict[str, Any]:
         "employment_type": _clean(exp.get("employmentType")),
         "start_date": _format_date(exp.get("startDate")),
         "end_date": end_date,
-        "is_current": not end_date or end_date.casefold() in {"present", "current"},
+        "is_current": (
+            end_date.casefold() in {"present", "current"}
+            or exp.get("isCurrent") is True
+            or exp.get("is_current") is True
+        ),
         "duration": _clean(exp.get("duration")),
         # Kept internal for rubrics that explicitly allow role-attached skills.
         "experience_skills": _string_list(exp.get("skills")),

@@ -22,7 +22,7 @@ Use **Evaluation role** to choose the scoring mode:
 - **Backend Engineer** uses the bundled 60-point PHP, Python, Laravel, and AWS rubric, including decimal scores, evidence warnings, and deterministic rank numbers.
 - **AI Engineer TRJ** uses the bundled 100-point AI and automation rubric, including capability-specific evidence, recency and duration scoring, evidence warnings, and deterministic rank numbers.
 - **Head Sales** uses a user-uploaded rubric and a fixed 60-point component-scoring contract. The model returns Evidence, Impact, and Duration points; Python calculates weighted capability scores, the final score, and deterministic rank numbers.
-- **SDE3** uses the bundled 62-point Agentic AI Technical Lead rubric. Python cleans the permitted LinkedIn evidence first, the model returns Evidence, Recency, and Duration judgments once, and Python calculates all weighted scores, the final score, and rank.
+- **SDE3** uses the bundled 62-point Agentic AI Technical Lead rubric. Python prepares the date and duration inputs, the model applies the rubric, Python validates and calculates the scores, and a separate request explains those fixed scores.
 - **Custom Role** creates a validated scoring contract from a role name, scoring categories, category maxima, optional discrete scores, outcome bands, and permitted LinkedIn evidence sources.
 
 Backend Engineer automatically loads `rubrics/backend_engineer.md`, AI Engineer TRJ automatically loads `rubrics/ai_engineer_trj.md`, and SDE3 automatically loads `rubrics/sde3.md`. You may still upload a replacement rubric, but it must preserve the selected role's scoring categories and output contract.
@@ -55,6 +55,15 @@ Use **AI provider** to choose OpenAI or DeepSeek. The model menu changes with th
 - DeepSeek reasoning defaults to **Off (lowest cost)** and can be changed to Low, High, or Maximum.
 
 Each run stores its provider, model, and reasoning setting so resume and retry use the original configuration. API keys are never saved; paste the matching provider key again when resuming a run.
+
+## SDE3 evaluation order
+
+1. Merge duplicate experience records and retain only permitted evidence. Calculate elapsed role months, recency inputs, and date-quality flags in Python. Year-only and written-duration estimates remain marked as estimates; a missing end date does not imply current employment.
+2. Request the 12 Evidence, Recency, and Evidenced Duration judgments, with short numeric keys first and no long explanation. Capability-specific duration still requires rubric judgment: full role tenure is not automatic evidence of sustained capability use, and overlapping periods and source caps must be respected.
+3. Validate every component as an explicit JSON integer in range, then calculate weighted capability scores and the final score in Python. Missing decisions never become zero. Keep independently valid batch records; give each missing or invalid candidate one individual recovery request.
+4. Send validated scores and their permitted evidence to a separate explanation request. Each candidate's complete explanation is limited to **150 total words across all four capabilities and the overall conclusion**, not 150 per capability. The application also caps normalized rows, saved-result previews, CSV, and Excel exports without changing numeric scores. Only explanation text is accepted from this response; it cannot overwrite scores. If the provider returns an overlong explanation, fails, or omits a candidate, save valid scores with a clearly labelled calculated summary covering all four capabilities within the same limit. Full provider responses remain available in raw diagnostics.
+
+A successful SDE3 batch normally uses two API calls. Individual score recovery can add one call per affected candidate. Saved raw results include date inputs, stage diagnostics, response/request IDs when provided, completion status, missing/invalid decisions, and usage across all stages. Other roles keep their existing request flow.
 
 ## Safety
 

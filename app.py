@@ -11,7 +11,7 @@ import hmac
 
 import streamlit as st
 
-from candidate_evaluator.constants import DEFAULT_PARALLEL_OPENAI_CALLS, OUTPUTS_DIR
+from candidate_evaluator.constants import DEFAULT_PARALLEL_OPENAI_CALLS
 from candidate_evaluator.extractor import (
     candidate_input_issue,
     candidate_input_issues,
@@ -41,6 +41,7 @@ from candidate_evaluator.progress import (
     set_current,
 )
 from candidate_evaluator.providers import DEEPSEEK_PROVIDER_KEY, DEFAULT_PROVIDER_KEY, get_provider, provider_options
+from candidate_evaluator.rubric_contract import rubric_input_issue
 from candidate_evaluator.roles import (
     CUSTOM_EVIDENCE_SOURCES,
     CUSTOM_ROLE_KEY,
@@ -514,16 +515,34 @@ def _show_run_controls(
             f"`{selected_run_status.get('model', 'unknown')}`{reasoning_label}."
         )
 
+    configured_role = None if custom_role_errors else get_role_profile(role_key, custom_role_config)
+    current_rubric_issue = rubric_input_issue(rubric_text, configured_role) if configured_role else ""
+    saved_rubric_issue = ""
+    if selected_run_role:
+        try:
+            saved_rubric = (run_dir(selected_run) / "rubric.md").read_text(encoding="utf-8")
+            saved_rubric_issue = rubric_input_issue(saved_rubric, selected_run_role)
+        except OSError as exc:
+            saved_rubric_issue = f"Could not read this saved run's rubric: {exc}"
+    active_rubric_issue = saved_rubric_issue if selected_run else current_rubric_issue
+    if active_rubric_issue:
+        st.error(active_rubric_issue)
+
     col1, col2, col3 = st.columns(3)
     with col1:
         start_clicked = st.button(
             "Start / resume evaluation",
-            disabled=not candidates or not rubric_text or (not selected_run and bool(custom_role_errors)),
+            disabled=(
+                not candidates
+                or not rubric_text
+                or bool(active_rubric_issue)
+                or (not selected_run and bool(custom_role_errors))
+            ),
         )
     with col2:
         retry_clicked = st.button(
             "Retry failed candidates",
-            disabled=not selected_run,
+            disabled=not selected_run or bool(saved_rubric_issue),
         )
     with col3:
         export_clicked = st.button("Save exports", disabled=not selected_run)
@@ -541,6 +560,9 @@ def _show_run_controls(
     active_run = selected_run or session_run
     ran_evaluation = False
     if start_clicked:
+        if active_rubric_issue:
+            st.error(active_rubric_issue)
+            st.stop()
         _require_api_ready(api_key, approved, provider_key)
         if active_run:
             _require_run_provider(active_run, provider_key)
@@ -561,6 +583,9 @@ def _show_run_controls(
         ran_evaluation = True
 
     if retry_clicked:
+        if saved_rubric_issue:
+            st.error(saved_rubric_issue)
+            st.stop()
         _require_api_ready(api_key, approved, provider_key)
         _require_run_provider(selected_run, provider_key)
         _run_evaluation(selected_run, api_key, parallel_calls, retry_failed=True)
@@ -604,13 +629,18 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     candidates = load_candidates(run_id)
+    role = role_for_run(run_id)
+    rubric_text = (run_dir(run_id) / "rubric.md").read_text(encoding="utf-8")
+    rubric_issue = rubric_input_issue(rubric_text, role)
+    if rubric_issue:
+        st.error(rubric_issue)
+        st.stop()
     recover_batch_results(run_id)
     reset_running(run_id)
     status = load_status(run_id)
     provider_key = status.get("provider", DEFAULT_PROVIDER_KEY)
     model = status.get("model") or get_provider(provider_key).default_model
     reasoning_effort = status.get("reasoning_effort", "none")
-    role = role_for_run(run_id)
     status_by_id = status.get("candidates", {})
     completed_row_ids = set(result_rows_by_id(run_id))
     progress = st.progress(0)
@@ -643,7 +673,6 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
         ):
             worklist.append(candidate)
 
-    rubric_text = (run_dir(run_id) / "rubric.md").read_text(encoding="utf-8")
     batches = [worklist[index : index + BATCH_SIZE] for index in range(0, len(worklist), BATCH_SIZE)]
     total = max(len(worklist) + skipped_in_pass, 1)
     max_workers = max(1, min(int(parallel_calls), len(batches) or 1))
@@ -657,6 +686,11 @@ def _run_evaluation(run_id: str, api_key: str, parallel_calls: int, retry_failed
         f"with up to {BATCH_SIZE} candidates per call. "
         f"Skipped {skipped_in_pass} unusable profile(s) without an API call."
     )
+    if role.key == "sde3":
+        message.info(
+            "SDE3 calculates date and duration inputs first, evaluates the rubric, then writes explanations "
+            "from validated scores. Missing score decisions receive one individual recovery attempt."
+        )
     _render_live_status(run_id, dashboard, preview, summary, run_finished=False, parallel_calls=max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -762,6 +796,8 @@ def _evaluate_candidate_batch_for_run(
             results = []
             for candidate, (grading, raw) in zip(group, evaluations):
                 try:
+                    if raw.get("evaluation_error"):
+                        raise ValueError(raw["evaluation_error"])
                     role_source = {
                         **candidate["source_row"],
                         "Candidate": candidate.get("candidate_name", ""),
@@ -859,6 +895,7 @@ def _evaluate_candidate_for_run(
     import time
 
     started = time.monotonic()
+    raw: dict[str, Any] = {}
     try:
         from candidate_evaluator.openai_scoring import evaluate_candidate
 
@@ -871,6 +908,8 @@ def _evaluate_candidate_for_run(
             candidate=candidate,
             role_profile=role,
         )
+        if raw.get("evaluation_error"):
+            raise ValueError(raw["evaluation_error"])
         role_source = {
             **candidate["source_row"],
             "Candidate": candidate.get("candidate_name", ""),
@@ -894,7 +933,7 @@ def _evaluate_candidate_for_run(
         return {
             "state": "failed",
             "error": f"Evaluation failed after the API call because the grading output was empty or unreadable: {exc}",
-            "raw": {"unparsed_content": raw_content} if raw_content else {},
+            "raw": {"unparsed_content": raw_content} if raw_content else raw,
             "elapsed_seconds": time.monotonic() - started,
         }
     except Exception as exc:
@@ -1013,18 +1052,14 @@ def _show_downloads(run_id: str) -> None:
             mime="text/csv",
             key=f"download-csv-{run_id}",
         )
-    xlsx_path = Path(OUTPUTS_DIR) / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
     with excel_col:
-        if xlsx_path.exists():
-            st.download_button(
-                "Download Excel",
-                xlsx_path.read_bytes(),
-                file_name=f"candidate_evaluation_{run_id}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"download-excel-{run_id}",
-            )
-        else:
-            st.caption("Click Save exports to create the Excel file.")
+        st.download_button(
+            "Download Excel",
+            _rows_to_xlsx_bytes(fixed_rows, role.output_columns),
+            file_name=f"candidate_evaluation_{run_id}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"download-excel-{run_id}",
+        )
     st.subheader("Completed Output")
     _display_table(fixed_rows)
 
@@ -1037,6 +1072,16 @@ def _rows_to_csv_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
+def _rows_to_xlsx_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
+    import pandas as pd
+
+    buffer = io.BytesIO()
+    # Build from the currently normalized rows, rather than a saved workbook
+    # whose prose or scores may predate the displayed evaluation.
+    pd.DataFrame(rows, columns=columns).to_excel(buffer, index=False, engine="openpyxl")
+    return buffer.getvalue()
+
+
 def _display_table(rows: list[dict[str, Any]]) -> None:
     if not rows:
         st.caption("No rows to show.")
@@ -1047,7 +1092,10 @@ def _display_table(rows: list[dict[str, Any]]) -> None:
     for row in rows:
         cells = "".join(f"<td>{escape(str(row.get(column, '')))}</td>" for column in columns)
         body.append(f"<tr>{cells}</tr>")
-    st.markdown(
+    # HTML must bypass Markdown parsing: blank lines in a candidate's rationale
+    # otherwise break the table into literal markup and detached paragraphs.
+    # Every dynamic header and cell is escaped above before reaching st.html.
+    st.html(
         """
         <style>
         .candidate-table-wrap {
@@ -1081,10 +1129,12 @@ def _display_table(rows: list[dict[str, Any]]) -> None:
             text-align: left;
             font-weight: 600;
         }
+        .candidate-table td {
+            white-space: pre-wrap;
+        }
         </style>
         """
         + f"<div class='candidate-table-wrap'><table class='candidate-table'><thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table></div>",
-        unsafe_allow_html=True,
     )
 
 

@@ -217,7 +217,7 @@ def test_exhaustive_linkedin_evidence_sources_are_normalized_and_filtered() -> N
     assert payload["experiences"][2] == {
         "index": 2,
         "position_or_title": "Analyst",
-        "is_current": True,
+        "is_current": False,
         "duration": "1 yr",
     }
 

@@ -749,7 +749,7 @@ ROLE_PROFILES = {
             "Use the strongest valid source once, do not stack repeated mentions, and do not infer personal work from an employer, title, framework keyword, or team outcome.",
             "Warnings do not change the score, and missing evidence must be described neutrally as unverified or not stated.",
             "Return no more than three material Strongest Evidence points separated by ' | '.",
-            "Write Score Rationale as one evidence-based narrative of no more than 250 words. Explain all four capabilities and end with a brief overall conclusion, but use natural wording without required headings, labels, or section order.",
+            "Write Score Rationale as one evidence-based narrative of at most 150 total words per candidate, shared across all four capabilities and the overall conclusion; this is not a per-capability allowance. Aim for roughly 25–30 words per capability and a brief overall conclusion, without required headings, labels, or section order.",
             "For each capability, explain the candidate's relevant work and its source, how recency and supported duration affected the result, and what missing or unclear evidence prevented a higher score. Do not merely list component-point values or calculate or repeat the mechanical score fields.",
         ],
         internal_role_flag_name="relevant_sde3_role",
@@ -761,9 +761,9 @@ ROLE_PROFILES = {
         ranking_tiebreaker_columns=list(SDE3_CATEGORY_SCORES),
         strongest_evidence_columns=["Strongest Evidence"],
         rationale_min_words=0,
-        rationale_max_words=250,
+        rationale_max_words=150,
         rationale_required_sections=None,
-        enforce_rationale_word_limit=False,
+        enforce_rationale_word_limit=True,
         enforce_rationale_sections=False,
         evidence_sources=["Headline", "About", "All experiences", "Projects"],
         require_experience=False,
@@ -832,8 +832,10 @@ def prepare_output_rows(
     role_or_key: Optional[str | RoleProfile],
     custom_config: Optional[dict[str, Any]] = None,
 ) -> list[dict]:
+    from .validation import normalize_rationale_row
+
     role = role_or_key if isinstance(role_or_key, RoleProfile) else get_role_profile(role_or_key, custom_config)
-    prepared = [dict(row) for row in rows]
+    prepared = [normalize_rationale_row(row, role) for row in rows]
     if role.ranked:
         tie_columns = role.ranking_tiebreaker_columns or []
 

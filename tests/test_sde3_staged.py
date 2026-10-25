@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,6 +13,9 @@ from openai import APIStatusError
 from candidate_evaluator.extractor import normalize_candidate
 from candidate_evaluator.openai_scoring import evaluate_candidate, evaluate_candidates
 from candidate_evaluator.roles import get_role_profile
+
+
+SDE3_RUBRIC = (Path(__file__).resolve().parents[1] / "rubrics" / "sde3.md").read_text(encoding="utf-8")
 
 
 COMPONENTS = {
@@ -105,7 +109,7 @@ def _evaluate(count: int = 1):
     return evaluate_candidates(
         api_key="mock-key",
         model="mock-model",
-        rubric_text="A fixed SDE3 rubric.",
+        rubric_text=SDE3_RUBRIC,
         candidates=[_candidate(n) for n in range(1, count + 1)],
         role_key="sde3",
     )
@@ -161,7 +165,7 @@ def test_explanations_receive_fixed_python_scores_and_cannot_overwrite_them(mode
     model.side_effect = [_response(_record(1)), _response(_explanation(1, **poisoned))]
 
     grading, raw = evaluate_candidate(
-        api_key="mock-key", model="mock-model", rubric_text="Rubric",
+        api_key="mock-key", model="mock-model", rubric_text=SDE3_RUBRIC,
         candidate=_candidate(1), role_key="sde3",
     )
 
@@ -297,6 +301,46 @@ def test_partial_explanations_fall_back_only_for_missing_or_duplicate_candidates
     assert all(grading["Final Score (/62)"] == 37.2 for grading, _ in results)
 
 
+def test_model_explanation_is_capped_at_150_words_total_per_candidate(model) -> None:
+    first = " ".join(f"Capability {index} evidence is supported. " * 15 for index in range(1, 5))
+    second = "The evidence supports this candidate. " * 10
+    assert len(first.split()) > 150
+    assert len(second.split()) < 150
+    model.side_effect = [
+        _response(_record(1), _record(2, _scores(1))),
+        _response(_explanation(2, second), _explanation(1, first)),
+    ]
+
+    results = _evaluate(2)
+
+    prompt = _request(model, 1)[0]["messages"][0]["content"]
+    assert "150" in prompt
+    assert "total" in prompt.casefold()
+    assert len(results[0][0]["Score Rationale"].split()) <= 150
+    assert results[0][1]["explanation_status"] == "calculated_summary"
+    for category in get_role_profile("sde3").category_scores:
+        assert category.rsplit(" Score (/", 1)[0] in results[0][0]["Score Rationale"]
+    assert "37.2/62" in results[0][0]["Score Rationale"]
+    assert results[1][0]["Score Rationale"] == second.strip()
+    assert [grading["Final Score (/62)"] for grading, _ in results] == [37.2, 18.6]
+    assert results[0][1]["grading"]["Score Rationale"] == results[0][0]["Score Rationale"]
+    assert model.call_count == 2
+
+
+def test_calculated_fallback_stays_within_150_words_even_when_missing_information_is_long(model) -> None:
+    scores = _scores()
+    scores["Missing or Unclear Information"] = "Unverified evidence and ownership duration. " * 70
+    model.side_effect = [_response(_record(1, scores)), RuntimeError("explanation unavailable")]
+
+    results = _evaluate()
+
+    grading, raw = results[0]
+    assert len(grading["Score Rationale"].split()) <= 150
+    assert grading["Final Score (/62)"] == 37.2
+    assert raw["explanation_status"] == "calculated_summary"
+    assert raw["grading"]["Score Rationale"] == grading["Score Rationale"]
+
+
 def test_usage_includes_initial_scores_targeted_recovery_and_explanations(model) -> None:
     model.side_effect = [
         _response(_record(1), tokens=1),
@@ -359,7 +403,7 @@ def test_deepseek_incomplete_response_preserves_raw_output_and_usage(model, monk
     ]
 
     results = evaluate_candidates(
-        api_key="mock-key", model="deepseek-flash", rubric_text="Rubric",
+        api_key="mock-key", model="deepseek-flash", rubric_text=SDE3_RUBRIC,
         candidates=[_candidate(1)], role_key="sde3", provider_key="deepseek",
     )
 
@@ -448,7 +492,7 @@ def test_single_candidate_run_preserves_provider_diagnostics_when_scores_remain_
     model.side_effect = [_response(_record(1, broken)), _response(_record(1, broken))]
 
     result = _evaluate_candidate_for_run(
-        "mock-key", "mock-model", "Rubric", _candidate(1), get_role_profile("sde3"),
+        "mock-key", "mock-model", SDE3_RUBRIC, _candidate(1), get_role_profile("sde3"),
     )
 
     assert model.call_count == 2
@@ -473,7 +517,7 @@ def test_batch_run_completes_valid_candidate_and_keeps_invalid_candidate_failure
     ]
 
     run_result = _evaluate_candidate_batch_for_run(
-        "mock-key", "mock-model", "Rubric", [_candidate(1), _candidate(2)], get_role_profile("sde3"),
+        "mock-key", "mock-model", SDE3_RUBRIC, [_candidate(1), _candidate(2)], get_role_profile("sde3"),
     )
 
     assert [_numbers(model, index) for index in range(3)] == [[1, 2], [2], [1]]

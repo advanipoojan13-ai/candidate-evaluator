@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -165,7 +166,7 @@ def test_deepseek_rejects_nonempty_but_truncated_output(monkeypatch) -> None:
         provider_key=DEEPSEEK_PROVIDER_KEY,
         model="deepseek-flash",
         reasoning_effort="none",
-        rubric_text="A rubric",
+        rubric_text=(Path(__file__).parents[1] / "rubrics" / "sde3.md").read_text(),
         candidate=_candidate(),
         role_profile=get_role_profile("sde3"),
         max_retries=0,

@@ -12,6 +12,7 @@ from .evidence import custom_evidence_payload
 from .extractor import merge_duplicate_experiences
 from .providers import DEEPSEEK_PROVIDER_KEY, DEFAULT_PROVIDER_KEY, ProviderProfile, get_provider
 from .roles import RoleProfile, get_role_profile
+from .rubric_contract import rubric_input_issue
 
 BATCH_SIZE = 5
 OPENAI_MAX_RETRIES = 2
@@ -79,6 +80,9 @@ def evaluate_candidates(
 
     provider = get_provider(provider_key)
     role = role_profile or get_role_profile(role_key)
+    rubric_issue = rubric_input_issue(rubric_text, role)
+    if rubric_issue:
+        raise ValueError(rubric_issue)
     # SDE3 owns bounded score-format recovery and generates explanations only
     # after the numeric evaluation has been validated and calculated.
     client_retries = 0 if role.key == "sde3" else max_retries

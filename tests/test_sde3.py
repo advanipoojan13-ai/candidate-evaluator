@@ -18,7 +18,14 @@ from candidate_evaluator.openai_scoring import (
     _response_schema,
     evaluate_candidates,
 )
-from candidate_evaluator.progress import init_run, role_for_run, run_dir
+from candidate_evaluator.progress import (
+    completed_preview_rows,
+    init_run,
+    result_rows,
+    result_rows_by_id,
+    role_for_run,
+    run_dir,
+)
 from candidate_evaluator.providers import DEEPSEEK_PROVIDER_KEY
 from candidate_evaluator.roles import get_role_profile, prepare_output_rows, role_options
 from candidate_evaluator.validation import apply_calculated_fields, coerce_fixed_row, validate_output_row
@@ -30,6 +37,8 @@ CAPABILITIES = [
     "Backend / System Architecture",
     "AI Solution Breadth & Judgment",
 ]
+
+SDE3_RUBRIC = (Path(__file__).resolve().parents[1] / "rubrics" / "sde3.md").read_text(encoding="utf-8")
 
 
 def _candidate() -> dict:
@@ -113,11 +122,11 @@ def test_sde3_is_a_dedicated_selectable_role_with_bundled_rubric() -> None:
     assert sum(role.category_scores.values()) == 62
     assert len(role.component_score_maxima) == 12
     assert set(role.component_score_maxima).isdisjoint(role.output_columns)
-    assert role.rationale_max_words == 250
+    assert role.rationale_max_words == 150
     assert role.rationale_required_sections is None
-    assert role.enforce_rationale_word_limit is False
+    assert role.enforce_rationale_word_limit is True
     assert role.enforce_rationale_sections is False
-    assert any("no more than 250 words" in instruction for instruction in role.instructions)
+    assert any("150" in instruction and "words" in instruction for instruction in role.instructions)
     assert any("without required headings" in instruction for instruction in role.instructions)
     assert Path(_default_rubric_path("sde3")).name == "sde3.md"
     assert Path(_default_rubric_path("sde3")).is_file()
@@ -202,7 +211,7 @@ def test_validation_rejects_missing_fractional_and_out_of_range_components() -> 
     assert any("must be between 0 and 3" in error for error in validate_output_row(excessive, "sde3"))
 
 
-def test_validation_enforces_structured_fields_but_treats_rationale_length_as_guidance() -> None:
+def test_validation_enforces_structured_fields_and_the_total_rationale_word_limit() -> None:
     row = _calculated_row()
     row["Date-Quality Warning"] = "Maybe"
     row["Strongest Evidence"] = "One | Two | Three | Four"
@@ -212,7 +221,7 @@ def test_validation_enforces_structured_fields_but_treats_rationale_length_as_gu
 
     assert any("Date-Quality Warning must be one of" in error for error in errors)
     assert any("Strongest Evidence has more than three items" in error for error in errors)
-    assert not any("Score Rationale" in error for error in errors)
+    assert any("Score Rationale must be no longer than 150 words" in error for error in errors)
 
 
 def test_validation_accepts_rationale_heading_variations_and_order() -> None:
@@ -233,11 +242,55 @@ def test_validation_accepts_rationale_heading_variations_and_order() -> None:
     assert validate_output_row(out_of_order, "sde3") == []
 
 
-def test_validation_accepts_rationale_above_250_words_without_losing_valid_scores() -> None:
+def test_validation_rejects_rationale_above_150_words_without_changing_numeric_scores() -> None:
     row = _calculated_row()
-    row["Score Rationale"] = "evidence " * 300
+    row["Score Rationale"] = "evidence " * 151
+
+    errors = validate_output_row(row, "sde3")
+
+    assert errors == ["Score Rationale must be no longer than 150 words; got 151."]
+    assert row["Final Score (/62)"] == 37.2
+
+
+def test_validation_accepts_exactly_150_total_rationale_words() -> None:
+    row = _calculated_row()
+    row["Score Rationale"] = "evidence " * 150
 
     assert validate_output_row(row, "sde3") == []
+
+
+def test_sde3_coercion_and_export_preparation_cap_total_rationale_words_and_preserve_scores() -> None:
+    row = _calculated_row()
+    original_rationale = "Evidence is supported. " * 100
+    row["Score Rationale"] = original_rationale
+
+    coerced = coerce_fixed_row(row, "sde3")
+    prepared = prepare_output_rows([row], "sde3")[0]
+
+    assert len(coerced["Score Rationale"].split()) <= 150
+    assert len(prepared["Score Rationale"].split()) <= 150
+    assert coerced["Final Score (/62)"] == prepared["Final Score (/62)"] == 37.2
+    assert row["Score Rationale"] == original_rationale
+    assert validate_output_row(coerced, "sde3") == []
+
+
+def test_saved_sde3_read_paths_cap_legacy_rationales_without_rewriting_raw_files(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidate = _candidate()
+    path = init_run("legacy-long-rationale", [candidate], "SDE3 rubric", "mock-model", role_key="sde3")
+    row = _calculated_row()
+    row["Score Rationale"] = "Saved profile evidence supports the evaluation. " * 60
+    serialized = json.dumps({"candidate_id": candidate["linkedin_profile_id"], "row": row}) + "\n"
+    (path / "rows.jsonl").write_text(serialized, encoding="utf-8")
+
+    rows = result_rows("legacy-long-rationale")
+    rows_by_id = result_rows_by_id("legacy-long-rationale")
+    preview = completed_preview_rows("legacy-long-rationale")
+
+    for result in (rows[0], rows_by_id[candidate["linkedin_profile_id"]], preview[0]):
+        assert len(result["Score Rationale"].split()) <= 150
+        assert result["Final Score (/62)"] == 37.2
+    assert (path / "rows.jsonl").read_text(encoding="utf-8") == serialized
 
 
 def test_validation_does_not_reject_an_empty_rationale() -> None:
@@ -409,7 +462,7 @@ def test_sde3_batch_scores_before_requesting_explanations(mock_openai) -> None:
     results = evaluate_candidates(
         api_key="test-key",
         model="test-model",
-        rubric_text="SDE3 rubric",
+        rubric_text=SDE3_RUBRIC,
         candidates=[_candidate(), _candidate()],
         role_profile=role,
     )
@@ -442,7 +495,7 @@ def test_sde3_unreadable_deepseek_batch_is_retryable_and_not_resent_or_split(mon
     result = _evaluate_candidate_batch_for_run(
         "key",
         "model",
-        "rubric",
+        SDE3_RUBRIC,
         [_candidate(), _candidate()],
         get_role_profile("sde3"),
         provider_key=DEEPSEEK_PROVIDER_KEY,
@@ -461,7 +514,7 @@ def test_full_flow_completes_valid_output_and_marks_invalid_or_request_output_fa
         return deepcopy(grading), {"grading": deepcopy(grading)}
 
     monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", valid_evaluation)
-    completed = _evaluate_candidate_for_run("key", "model", "rubric", _candidate(), role)
+    completed = _evaluate_candidate_for_run("key", "model", SDE3_RUBRIC, _candidate(), role)
     assert completed["state"] == "completed"
     assert completed["row"]["Final Score (/62)"] == 37.2
 
@@ -471,7 +524,7 @@ def test_full_flow_completes_valid_output_and_marks_invalid_or_request_output_fa
         return invalid, {"grading": invalid}
 
     monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", invalid_evaluation)
-    failed = _evaluate_candidate_for_run("key", "model", "rubric", _candidate(), role)
+    failed = _evaluate_candidate_for_run("key", "model", SDE3_RUBRIC, _candidate(), role)
     assert failed["state"] == "failed"
     assert "incomplete or invalid" in failed["error"]
 
@@ -479,6 +532,6 @@ def test_full_flow_completes_valid_output_and_marks_invalid_or_request_output_fa
         raise RuntimeError("provider unavailable")
 
     monkeypatch.setattr("candidate_evaluator.openai_scoring.evaluate_candidate", failed_evaluation)
-    failed = _evaluate_candidate_for_run("key", "model", "rubric", _candidate(), role)
+    failed = _evaluate_candidate_for_run("key", "model", SDE3_RUBRIC, _candidate(), role)
     assert failed["state"] == "failed"
     assert failed["error"] == "provider unavailable"

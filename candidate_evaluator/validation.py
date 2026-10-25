@@ -8,6 +8,40 @@ from typing import Any, Optional
 from .roles import RoleProfile, get_role_profile
 
 
+SDE3_RATIONALE_MAX_WORDS = 150
+
+
+def limit_rationale(text: str, max_words: int = SDE3_RATIONALE_MAX_WORDS) -> str:
+    """Keep at most ``max_words`` Unicode-whitespace-separated words.
+
+    Prefer ending at a complete sentence within the budget. If there is no
+    sentence boundary, cut at the final allowed word and add an ellipsis to
+    that word, so the marker cannot add a word beyond the limit.
+    """
+    text = text.strip()
+    words = list(re.finditer(r"\S+", text))
+    if max_words <= 0:
+        return ""
+    if len(words) <= max_words:
+        return text
+    prefix = text[:words[max_words - 1].end()].rstrip()
+    sentence_ends = list(re.finditer(r"[.!?…。](?:[\"'”’\)\]]*)(?=\s|$)", prefix))
+    if sentence_ends:
+        return prefix[:sentence_ends[-1].end()].rstrip()
+    return prefix.rstrip(";,:–—-") + "…"
+
+
+def normalize_rationale_row(
+    row: dict[str, Any], role_or_key: str | RoleProfile = "design"
+) -> dict[str, Any]:
+    """Cap user-visible SDE3 rationale on a copy, preserving numeric scores."""
+    role = _resolve_role(role_or_key)
+    normalized = dict(row)
+    if role.key == "sde3" and "Score Rationale" in normalized:
+        normalized["Score Rationale"] = limit_rationale(str(normalized["Score Rationale"] or ""))
+    return normalized
+
+
 def expected_outcome(total_score: float, role: RoleProfile) -> str:
     for low, high, label in role.outcome_bands:
         if low <= total_score <= high:
@@ -126,7 +160,7 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
         items = _split_evidence_items(str(fixed.get(column, "") or ""))
         if len(items) > 3:
             fixed[column] = " | ".join(items[:3])
-    return fixed
+    return normalize_rationale_row(fixed, role)
 
 
 def apply_calculated_fields(
@@ -238,7 +272,7 @@ def _format_years_and_months(total_months: int) -> str:
 
 
 def _word_count(text: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", text))
+    return len(text.split())
 
 
 def _split_evidence_items(value: str) -> list[str]:

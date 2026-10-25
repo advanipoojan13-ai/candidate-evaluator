@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - non-Unix fallback
 from .constants import OUTPUTS_DIR, RUNS_DIR
 from .providers import DEFAULT_PROVIDER_KEY, get_provider
 from .roles import DEFAULT_ROLE_KEY, RoleProfile, get_role_profile, prepare_output_rows
+from .validation import normalize_rationale_row
 
 
 def make_run_id() -> str:
@@ -356,14 +357,16 @@ def result_rows(run_id: str) -> list[dict[str, Any]]:
     for item in load_jsonl(run_dir(run_id) / "rows.jsonl"):
         by_id[item["candidate_id"]] = item["row"]
     candidate_order = [candidate["linkedin_profile_id"] for candidate in load_candidates(run_id)]
-    return [by_id[key] for key in candidate_order if key in by_id]
+    role = role_for_run(run_id)
+    return [normalize_rationale_row(by_id[key], role) for key in candidate_order if key in by_id]
 
 
 def result_rows_by_id(run_id: str) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for item in load_jsonl(run_dir(run_id) / "rows.jsonl"):
         rows[item["candidate_id"]] = item["row"]
-    return rows
+    role = role_for_run(run_id)
+    return {key: normalize_rationale_row(row, role) for key, row in rows.items()}
 
 
 def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[dict[str, Any]]:

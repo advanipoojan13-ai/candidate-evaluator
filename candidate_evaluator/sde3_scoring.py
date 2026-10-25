@@ -5,7 +5,14 @@ from dataclasses import replace
 from typing import Any, Callable
 
 from .roles import RoleProfile
-from .validation import apply_calculated_fields, coerce_fixed_row, validate_output_row
+from .validation import (
+    SDE3_RATIONALE_MAX_WORDS,
+    apply_calculated_fields,
+    coerce_fixed_row,
+    limit_rationale,
+    normalize_rationale_row,
+    validate_output_row,
+)
 
 
 def _score_fields(role: RoleProfile) -> dict[str, str]:
@@ -71,21 +78,22 @@ def _validated_scores(model_grading: Any, candidate: dict, payload: dict, role: 
 
 
 def _fallback_explanation(grading: dict, role: RoleProfile) -> str:
-    recency = ("undated or more than five years ago", "37–60 months ago", "13–36 months ago", "current or within 12 months")
-    duration = ("under one year or not reliably established", "one to under two years", "two to under three years", "at least three years")
-    evidence = ("not stated in permitted sources", "a limited keyword or role-attached skill", "an explicit headline or About mention", "role-specific or project evidence", "explicit delivery or actual-use experience")
+    recency = ("undated or over 60 months old", "37–60 months old", "13–36 months old", "current or within 12 months")
+    duration = ("under one year or unverified", "one to under two years", "two to under three years", "at least three years")
+    evidence = ("not stated", "limited skill or keyword evidence", "explicit headline or About evidence", "role-specific or project evidence", "explicit delivery or actual-use experience")
     parts = ["The provider explanation was unavailable. This summary uses the validated scoring decisions."]
     for category, rule in role.component_scoring.items():
         name = category.rsplit(" Score (/", 1)[0]
         parts.append(
-            f"{name}: evidence was assessed as {evidence[grading[rule.evidence_column]]}; "
-            f"qualifying use was assessed as {recency[grading[rule.impact_column]]}; "
-            f"supported duration was assessed as {duration[grading[rule.duration_column]]}."
+            f"{name}: {evidence[grading[rule.evidence_column]]}; "
+            f"qualifying use {recency[grading[rule.impact_column]]}; "
+            f"supported duration {duration[grading[rule.duration_column]]}."
         )
     parts.append(f"The weighted total is {grading[role.total_column]:g}/{role.total_max:g}.")
     if grading.get("Missing or Unclear Information"):
-        parts.append(f"Unverified information: {grading['Missing or Unclear Information']}")
-    return " ".join(parts)
+        missing = limit_rationale(str(grading["Missing or Unclear Information"]), max_words=15)
+        parts.append(f"Unverified information: {missing}")
+    return limit_rationale(" ".join(parts))
 
 
 def evaluate_sde3_candidates(
@@ -210,11 +218,15 @@ def evaluate_sde3_candidates(
             "The validated component points, weighted capability scores, and final score are fixed inputs: "
             "do not rescore, alter, or return numeric fields. Explain the relevant work and sources, "
             "capability-specific recency, supported duration, and missing evidence for all four capabilities, "
-            "then conclude why the overall score follows. Follow the supplied rubric's prose and length guidance. "
+            "then conclude why the overall score follows. Use at most 150 total words per candidate across "
+            "all four capability explanations and the overall conclusion combined, not 150 words per capability. "
+            "Aim for roughly 25–30 words per capability plus a brief conclusion. "
             "Use only the supplied permitted profile evidence, calculated date inputs, rubric, and fixed scores. "
             "Never claim that missing evidence proves a lack of ability. Return exactly the supplied candidate numbers.\n\nRUBRIC\n"
             + rubric_text
-            + "\n\nCURRENT STAGE: EXPLANATION ONLY. Return only Score Rationale inside grading, per the supplied schema."
+            + "\n\nCURRENT STAGE: EXPLANATION ONLY. Return only Score Rationale inside grading, per the supplied schema. "
+            "The firm limit is 150 total words per candidate, including every capability and the conclusion, "
+            "even if the supplied rubric contains a longer historical limit."
         )
         try:
             parsed = call_stage(explain_prompt, {"candidates": [
@@ -237,8 +249,17 @@ def evaluate_sde3_candidates(
                 text = explanation.get("Score Rationale") if isinstance(explanation, dict) else None
                 # Numeric fields in this response are never merged into scores.
                 if isinstance(text, str) and text.strip():
-                    valid[n][0]["Score Rationale"] = text.strip()
-                    valid[n][1]["explanation_status"] = "generated"
+                    if len(text.split()) > SDE3_RATIONALE_MAX_WORDS:
+                        # A prefix could omit later capabilities or the overall
+                        # conclusion. Use all four validated scoring decisions
+                        # rather than silently losing those explanations.
+                        valid[n][0]["Score Rationale"] = _fallback_explanation(valid[n][0], role)
+                        valid[n][1]["explanation_status"] = "calculated_summary"
+                        valid[n][1]["explanation_error"] = "Provider explanation exceeded the 150-word total limit."
+                        valid[n][1]["rationale_truncated"] = True
+                    else:
+                        valid[n][0]["Score Rationale"] = text.strip()
+                        valid[n][1]["explanation_status"] = "generated"
         except Exception as exc:
             for _, raw in valid.values():
                 raw["explanation_error"] = str(exc)
@@ -251,6 +272,7 @@ def evaluate_sde3_candidates(
                 grading["Score Rationale"] = _fallback_explanation(grading, role)
                 raw["explanation_status"] = "calculated_summary"
                 raw.setdefault("explanation_error", "Missing, duplicate, or empty explanation record.")
+            grading = normalize_rationale_row(grading, role)
             raw = {**raw, "grading": dict(grading), "provider_diagnostics": diagnostics}
             results.append((grading, raw))
         else:

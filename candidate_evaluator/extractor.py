@@ -6,6 +6,7 @@ from typing import Any, Optional, Union
 
 from .constants import SOURCE_COLUMNS
 from .evidence import has_selected_evidence
+from .unipile import adapt_unipile_profile, is_unipile_profile
 
 
 ALLOWED_EXPERIENCE_FIELDS = [
@@ -21,7 +22,7 @@ ALLOWED_EXPERIENCE_FIELDS = [
 
 
 def load_profiles_from_text(text: str) -> list[dict[str, Any]]:
-    data = json.loads(text)
+    data = json.loads(text.lstrip("\ufeff"))
     if isinstance(data, list):
         profiles = data
     elif isinstance(data, dict):
@@ -38,10 +39,19 @@ def load_profiles(path: Union[str, Path]) -> list[dict[str, Any]]:
 
 
 def _find_profile_list(data: dict[str, Any]) -> list[dict[str, Any]]:
+    if data.get("object") == "Error" or "error" in data or str(data.get("type", "")).startswith("errors/"):
+        raise ValueError("Expected LinkedIn candidate profiles, not an API error response.")
+    # A profile contains section arrays; those are never candidate lists.
+    if is_unipile_profile(data) or any(key in data for key in ("publicIdentifier", "linkedinUrl", "fullName", "firstName")):
+        return [data]
     for key in ("items", "profiles", "data", "results"):
         value = data.get(key)
-        if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+        if isinstance(value, list):
             return value
+        if isinstance(value, dict):
+            return _find_profile_list(value)
+    if "object" in data:
+        raise ValueError("Expected LinkedIn candidate profiles, not an API error or another response type.")
     for value in data.values():
         if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
             return value
@@ -49,13 +59,17 @@ def _find_profile_list(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
+    warnings: list[str] = []
+    unipile = is_unipile_profile(profile)
+    if unipile:
+        profile, warnings = adapt_unipile_profile(profile)
     experiences = [_normalize_experience(exp, i) for i, exp in enumerate(profile.get("experience") or []) if isinstance(exp, dict)]
     education = [_format_education(edu) for edu in (profile.get("education") or []) if isinstance(edu, dict)]
     candidate = {
         "source_index": index,
         "linkedin_profile_id": _first_nonempty(profile.get("publicIdentifier"), profile.get("id"), f"candidate-{index + 1}"),
         "linkedin_url": _clean(profile.get("linkedinUrl")),
-        "candidate_name": _candidate_name(profile),
+        "candidate_name": " ".join(part for part in (profile.get("firstName"), profile.get("lastName")) if part) if unipile else _candidate_name(profile),
         "headline": _clean(profile.get("headline")),
         "about": _clean(profile.get("about")),
         "location": _format_location(profile.get("location")),
@@ -72,6 +86,8 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
         "services_present": "services" in profile and profile.get("services") is not None,
     }
     candidate["source_row"] = build_source_row(candidate)
+    if warnings:
+        candidate["import_warnings"] = warnings
     return candidate
 
 
@@ -220,7 +236,7 @@ def _normalize_experience(exp: dict[str, Any], index: int) -> dict[str, Any]:
         "employment_type": _clean(exp.get("employmentType")),
         "start_date": _format_date(exp.get("startDate")),
         "end_date": end_date,
-        "is_current": not end_date or end_date.casefold() in {"present", "current"},
+        "is_current": exp.get("isCurrent", not end_date or end_date.casefold() in {"present", "current"}),
         "duration": _clean(exp.get("duration")),
         # Kept internal for rubrics that explicitly allow role-attached skills.
         "experience_skills": _string_list(exp.get("skills")),

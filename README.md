@@ -1,6 +1,6 @@
 # Candidate Evaluator
 
-A local Streamlit app for evaluating Apify LinkedIn profile JSON files against a rubric with OpenAI or DeepSeek.
+A local Streamlit app for evaluating Apify or Unipile LinkedIn profile JSON files against a rubric with OpenAI or DeepSeek.
 
 ## Run
 
@@ -14,6 +14,8 @@ The app opens with the sample JSON and rubric paths prefilled when those files a
 - `/Users/sehermehta/Documents/Documents - Seher’s MacBook Air/Codex/candidate-evaluator/rubric.md`
 
 You can also upload a different LinkedIn JSON file and rubric.
+
+Unipile exports are detected automatically. Single profiles, profile arrays, and `items` / `profiles` / `data` / `results` wrappers are accepted. See [Unipile migration notes](UNIPILE_MIGRATION.md) for field mappings, date handling, completeness warnings, and the ZEISS VisioGen validation checklist.
 
 Use **Evaluation role** to choose the scoring mode:
 

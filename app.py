@@ -412,6 +412,9 @@ def _show_preview(candidates: list[dict[str, Any]], rubric_text: str, role: Role
     st.subheader("Extraction Preview")
     st.write(f"Candidates loaded: {len(candidates)}")
     st.write(f"Rubric loaded: {'yes' if rubric_text else 'no'}")
+    for candidate in candidates:
+        for warning in candidate.get("import_warnings", []):
+            st.warning(f"{candidate.get('candidate_name') or candidate['linkedin_profile_id']}: {warning}")
     if role is None:
         st.warning("Complete the custom role setup before starting an evaluation.")
         return

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from candidate_evaluator.extractor import (
     candidate_input_issue,
     candidate_input_issues,
@@ -9,6 +11,7 @@ from candidate_evaluator.extractor import (
     normalize_candidate,
     normalize_candidates,
 )
+from candidate_evaluator.openai_scoring import _candidate_payload
 from candidate_evaluator.roles import get_role_profile
 
 
@@ -21,6 +24,125 @@ def _sde3_issue(candidate: dict) -> str:
         role.require_experience,
         role.skip_if_no_evidence,
     )
+
+
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        lambda profile: profile,
+        lambda profile: [profile],
+        lambda profile: {"data": profile},
+        lambda profile: {"data": {"results": [profile]}},
+    ],
+)
+@pytest.mark.parametrize("bom", ["", "\ufeff"])
+def test_unipile_upload_formats(wrap, bom) -> None:
+    profile = {"object": "UserProfile", "display_name": "Asha Rao", "public_identifier": "asha"}
+    assert load_profiles_from_text(bom + json.dumps(wrap(profile))) == [profile]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [None, {"data": {"error": "profile unavailable"}}, {"items": [None]}, [{"data": []}, 5]],
+)
+def test_invalid_export_reports_input_error(payload) -> None:
+    with pytest.raises(ValueError):
+        load_profiles_from_text(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"object": "UserProfile", "type": "organization", "display_name": "Example Co"},
+        {"object": "UserProfile", "provider": "TELEGRAM", "display_name": "Example"},
+        {"object": "UserProfile", "specifics": {"instagram": {}}, "display_name": "Example"},
+    ],
+)
+def test_non_candidate_profiles_are_ignored(record) -> None:
+    person = {"object": "UserProfile", "type": "individual", "display_name": "Asha Rao"}
+    assert load_profiles_from_text(json.dumps(record)) == []
+    assert load_profiles_from_text(json.dumps([record, person])) == [person]
+
+
+@pytest.mark.parametrize(
+    ("dates", "current"),
+    [
+        ({"start": "1/1/2020"}, True),
+        ({"started_on": "2020-01", "ended_on": None}, True),
+        ({"started_on": "2020", "ended_on": "2022"}, False),
+        ({"started_on": "2020", "is_current": False}, False),
+        ({"started_on": {"text": ""}}, False),
+        ({"ended_on": None}, False),
+    ],
+)
+def test_unipile_open_ended_dates_and_empty_experience_entries(dates, current) -> None:
+    candidate = normalize_candidate(
+        {"object": "UserProfile", "work_experience": [{}, None, {"position": "Sales Lead", **dates}]}, 0
+    )
+    assert len(candidate["experiences"]) == 1
+    assert candidate["experiences"][0]["is_current"] is current
+
+
+def test_head_sales_skips_unipile_record_without_a_name() -> None:
+    candidate = normalize_candidate({"object": "UserProfile", "public_identifier": "candidate-slug"}, 0)
+    role = get_role_profile("head_sales")
+    assert candidate["linkedin_url"] == "https://www.linkedin.com/in/candidate-slug/"
+    assert "candidate name is empty" in candidate_input_issue(
+        candidate, role.key, role.evidence_sources, role.require_experience, role.skip_if_no_evidence
+    )
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_head_sales_receives_equivalent_apify_and_unipile_model_payloads(version) -> None:
+    apify = {
+        "fullName": "Asha Rao",
+        "publicIdentifier": "asha",
+        "headline": "Sales leader",
+        "about": "Built dealer networks.",
+        "location": "Pune",
+        "experience": [{
+            "companyName": "Example Co", "position": "Sales Lead",
+            "description": "Expanded into three cities.",
+            "startDate": {"year": 2020, "month": 1}, "endDate": {"year": 2022, "month": 3},
+            "location": "Pune", "skills": ["Prospecting"],
+        }],
+    }
+    unipile = {
+        "object": "UserProfile", "type": "individual", "display_name": "Asha Rao",
+        "public_identifier": "asha", "description": "Sales leader", "bio": "Built dealer networks.",
+        "emails": ["private@example.test"],
+        "specifics": {"linkedin": {
+            "location": "Pune", "projects": [{"name": "A project"}],
+            "experience": [{
+                "company": {"name": "Example Co"}, "title": "Sales Lead",
+                "description": "Expanded into three cities.", "started_on": "2020-01",
+                "ended_on": "2022-03", "location": "Pune", "skills": ["Prospecting"],
+            }],
+        }},
+    }
+    if version == "v1":
+        unipile = {
+            "object": "UserProfile", "provider": "LINKEDIN", "name": "Asha Rao",
+            "public_identifier": "asha", "headline": "Sales leader", "summary": "Built dealer networks.",
+            "location": "Pune", "contact_info": {"emails": ["private@example.test"]},
+            "work_experience": [{
+                "company": "Example Co", "position": "Sales Lead",
+                "description": "Expanded into three cities.",
+                "start": {"year": 2020, "month": 1}, "end": {"year": 2022, "month": 3},
+                "location": "Pune", "skills": ["Prospecting"],
+            }],
+        }
+    role = get_role_profile("head_sales")
+    [candidate] = normalize_candidates(load_profiles_from_text(json.dumps({"data": unipile})))
+    assert candidate_input_issue(
+        candidate, role.key, role.evidence_sources, role.require_experience, role.skip_if_no_evidence
+    ) == ""
+    payload = _candidate_payload(candidate, role)
+    assert payload == _candidate_payload(normalize_candidate(apify, 0), role)
+    assert set(payload) == {
+        "LinkedIn Profile ID", "LinkedIn URL", "Candidate Name", "Location", "Headline", "About", "experiences",
+    }
+    assert set(payload["experiences"][0]) == set(role.experience_fields)
 
 
 def test_unipile_v1_full_profile_maps_to_existing_internal_contract() -> None:

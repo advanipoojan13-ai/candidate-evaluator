@@ -23,11 +23,11 @@ ALLOWED_EXPERIENCE_FIELDS = [
 
 
 def load_profiles_from_text(text: str) -> list[dict[str, Any]]:
-    data = json.loads(text)
+    data = json.loads(text.removeprefix("\ufeff"))
     if isinstance(data, list):
         profiles = _profile_records(data)
     elif isinstance(data, dict):
-        profiles = [data] if _looks_like_profile(data) else _find_profile_list(data)
+        profiles = _profiles_from_object(data)
     else:
         raise ValueError("JSON root must be a list of profiles or an object containing a profile list.")
     if not all(isinstance(item, dict) for item in profiles):
@@ -39,11 +39,17 @@ def load_profiles(path: Union[str, Path]) -> list[dict[str, Any]]:
     return load_profiles_from_text(Path(path).read_text(encoding="utf-8"))
 
 
-def _find_profile_list(data: dict[str, Any]) -> list[dict[str, Any]]:
+def _profiles_from_object(data: dict[str, Any]) -> list[dict[str, Any]]:
+    if _known_non_person(data):
+        return []
+    if _looks_like_profile(data):
+        return [data]
     for key in ("items", "profiles", "data", "results"):
         value = data.get(key)
-        if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+        if isinstance(value, list):
             return _profile_records(value)
+        if isinstance(value, dict):
+            return _profiles_from_object(value)
     for value in data.values():
         if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
             profiles = _profile_records(value)
@@ -60,6 +66,17 @@ def _profile_records(records: list[Any]) -> list[Any]:
 def _known_non_person(record: dict[str, Any]) -> bool:
     record_type = _clean(record.get("type")).upper()
     object_type = _clean(record.get("object")).upper()
+    if _is_unipile_profile(record):
+        provider = _clean(record.get("provider")).upper()
+        specifics = record.get("specifics")
+        if provider and provider != "LINKEDIN":
+            return True
+        if isinstance(specifics, dict) and "linkedin" not in specifics and specifics.keys() & {
+            "instagram", "telegram", "whatsapp"
+        }:
+            return True
+        if object_type == "USERPROFILE" and record_type in {"ORGANIZATION", "OTHER"}:
+            return True
     return record_type in {"COMPANY", "JOB", "JOBS", "POST", "SCHOOL"} or object_type in {
         "COMPANYSEARCHRESULT",
         "JOBSEARCHRESULT",
@@ -87,7 +104,7 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
     experiences = [
         _normalize_experience(exp, i, unipile=is_unipile, current_position=current_positions)
         for i, exp in enumerate(experience_items)
-        if isinstance(exp, dict)
+        if isinstance(exp, dict) and (exp or not is_unipile)
     ]
     education_items = _first_list(profile.get("education"), specifics.get("education"))
     education = [_format_education(edu) for edu in education_items if isinstance(edu, dict)]
@@ -119,7 +136,7 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
             f"candidate-{index + 1}",
         ),
         "linkedin_url": linkedin_url,
-        "candidate_name": _candidate_name(profile),
+        "candidate_name": _candidate_name(profile, unipile=is_unipile),
         "headline": _first_nonempty(profile.get("headline"), profile.get("description")),
         "about": _first_nonempty(profile.get("about"), profile.get("summary"), profile.get("bio")),
         "location": _format_location(_first_value(profile.get("location"), specifics.get("location"))),
@@ -317,6 +334,7 @@ def _normalize_experience(
 ) -> dict[str, Any]:
     start_value = _first_raw(exp, "startDate", "start", "started_on")
     end_value = _first_raw(exp, "endDate", "end", "ended_on")
+    start_date = _format_date(start_value)
     end_date = _format_date(end_value)
     company = _first_nonempty(exp.get("companyName"), _object_name(exp.get("company")))
     position = _first_nonempty(
@@ -327,8 +345,9 @@ def _normalize_experience(
     # ``ended_on: null``. Both shapes mean the role is open-ended.
     unipile_open_ended = (
         unipile
+        and explicit_current is not False
         and end_value in (None, "")
-        and start_value not in (None, "")
+        and bool(start_date)
     )
     return {
         "index": index,
@@ -340,7 +359,7 @@ def _normalize_experience(
             exp.get("employmentType"), exp.get("employment_type"), exp.get("status")
         ),
         "workplace_type": _first_nonempty(exp.get("workplaceType"), exp.get("workplace_type")),
-        "start_date": _format_date(start_value),
+        "start_date": start_date,
         "end_date": end_date,
         "is_current": (
             end_date.casefold() in {"present", "current"}
@@ -498,7 +517,7 @@ def _date_range(start: str, end: str) -> str:
     return start or end or ""
 
 
-def _candidate_name(profile: dict[str, Any]) -> str:
+def _candidate_name(profile: dict[str, Any], *, unipile: bool = False) -> str:
     first_last = " ".join(
         part
         for part in [
@@ -512,9 +531,7 @@ def _candidate_name(profile: dict[str, Any]) -> str:
         profile.get("fullName"),
         profile.get("display_name"),
         profile.get("name"),
-        profile.get("publicIdentifier"),
-        profile.get("public_identifier"),
-        "",
+        profile.get("publicIdentifier") if not unipile else "",
     )
 
 
@@ -582,6 +599,8 @@ def _is_unipile_profile(profile: dict[str, Any]) -> bool:
     if _clean(profile.get("object")).casefold() in {
         "userprofile", "peoplesearchresult", "linkedinjobapplicant", "searchresult"
     }:
+        return True
+    if _clean(profile.get("type")).casefold() == "people":
         return True
     return any(
         key in profile

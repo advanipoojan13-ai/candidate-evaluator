@@ -91,7 +91,7 @@ def main() -> None:
         api_key = st.text_input(f"{provider.label} API key", type="password")
         approved = st.checkbox(f"I approve paid {provider.label} API calls for this run")
 
-    candidates, rubric_text = _load_inputs(json_upload, sample_path, rubric_upload, rubric_path)
+    candidates, rubric_text = _load_inputs(json_upload, sample_path, rubric_upload, rubric_path, role_key)
     custom_role_config, custom_role_errors = _custom_role_editor(role_key)
     role = None if custom_role_errors else get_role_profile(role_key, custom_role_config)
 
@@ -378,15 +378,18 @@ def _default_rubric_path(role_key: str) -> str:
     return DEFAULT_RUBRIC_PATH if role_key == "design" and Path(DEFAULT_RUBRIC_PATH).exists() else ""
 
 
-def _load_inputs(json_upload: Any, sample_path: str, rubric_upload: Any, rubric_path: str) -> tuple[list[dict[str, Any]], str]:
+def _load_inputs(
+    json_upload: Any, sample_path: str, rubric_upload: Any, rubric_path: str, role_key: str
+) -> tuple[list[dict[str, Any]], str]:
     candidates: list[dict[str, Any]] = []
     rubric_text = ""
+    head_sales = role_key == "head_sales"
     try:
         if json_upload is not None:
-            candidates = _candidates_from_json_text(json_upload.getvalue().decode("utf-8"))
+            candidates = _candidates_from_json_text(json_upload.getvalue().decode("utf-8"), head_sales)
         elif sample_path:
             path = Path(sample_path)
-            candidates = _candidates_from_json_path(str(path), path.stat().st_mtime_ns)
+            candidates = _candidates_from_json_path(str(path), path.stat().st_mtime_ns, head_sales)
     except Exception as exc:
         st.error(f"Could not read LinkedIn JSON: {exc}")
 
@@ -401,13 +404,13 @@ def _load_inputs(json_upload: Any, sample_path: str, rubric_upload: Any, rubric_
 
 
 @st.cache_data(show_spinner=False)
-def _candidates_from_json_text(text: str) -> list[dict[str, Any]]:
-    return normalize_candidates(load_profiles_from_text(text))
+def _candidates_from_json_text(text: str, head_sales: bool) -> list[dict[str, Any]]:
+    return normalize_candidates(load_profiles_from_text(text, head_sales=head_sales), head_sales=head_sales)
 
 
 @st.cache_data(show_spinner=False)
-def _candidates_from_json_path(path: str, _mtime_ns: int) -> list[dict[str, Any]]:
-    return normalize_candidates(load_profiles(path))
+def _candidates_from_json_path(path: str, _mtime_ns: int, head_sales: bool) -> list[dict[str, Any]]:
+    return normalize_candidates(load_profiles(path, head_sales=head_sales), head_sales=head_sales)
 
 
 def _show_preview(candidates: list[dict[str, Any]], rubric_text: str, role: RoleProfile | None) -> None:

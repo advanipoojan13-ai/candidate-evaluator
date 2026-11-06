@@ -22,12 +22,12 @@ ALLOWED_EXPERIENCE_FIELDS = [
 ]
 
 
-def load_profiles_from_text(text: str) -> list[dict[str, Any]]:
-    data = json.loads(text.removeprefix("\ufeff"))
+def load_profiles_from_text(text: str, *, head_sales: bool = False) -> list[dict[str, Any]]:
+    data = json.loads(text.removeprefix("\ufeff") if head_sales else text)
     if isinstance(data, list):
-        profiles = _profile_records(data)
+        profiles = _profile_records(data, head_sales)
     elif isinstance(data, dict):
-        profiles = _profiles_from_object(data)
+        profiles = _profiles_from_object(data, head_sales)
     else:
         raise ValueError("JSON root must be a list of profiles or an object containing a profile list.")
     if not all(isinstance(item, dict) for item in profiles):
@@ -35,38 +35,38 @@ def load_profiles_from_text(text: str) -> list[dict[str, Any]]:
     return profiles
 
 
-def load_profiles(path: Union[str, Path]) -> list[dict[str, Any]]:
-    return load_profiles_from_text(Path(path).read_text(encoding="utf-8"))
+def load_profiles(path: Union[str, Path], *, head_sales: bool = False) -> list[dict[str, Any]]:
+    return load_profiles_from_text(Path(path).read_text(encoding="utf-8"), head_sales=head_sales)
 
 
-def _profiles_from_object(data: dict[str, Any]) -> list[dict[str, Any]]:
-    if _known_non_person(data):
+def _profiles_from_object(data: dict[str, Any], head_sales: bool) -> list[dict[str, Any]]:
+    if head_sales and _known_non_person(data, head_sales):
         return []
     if _looks_like_profile(data):
         return [data]
     for key in ("items", "profiles", "data", "results"):
         value = data.get(key)
-        if isinstance(value, list):
-            return _profile_records(value)
-        if isinstance(value, dict):
-            return _profiles_from_object(value)
+        if isinstance(value, list) and (head_sales or all(isinstance(item, dict) for item in value)):
+            return _profile_records(value, head_sales)
+        if head_sales and isinstance(value, dict):
+            return _profiles_from_object(value, head_sales)
     for value in data.values():
         if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
-            profiles = _profile_records(value)
+            profiles = _profile_records(value, head_sales)
             if profiles and any(_looks_like_profile(item) for item in profiles):
                 return profiles
     raise ValueError("Could not find a list of candidate profiles in the JSON object.")
 
 
-def _profile_records(records: list[Any]) -> list[Any]:
+def _profile_records(records: list[Any], head_sales: bool) -> list[Any]:
     """Keep candidate-like records while ignoring known mixed search results."""
-    return [record for record in records if not isinstance(record, dict) or not _known_non_person(record)]
+    return [record for record in records if not isinstance(record, dict) or not _known_non_person(record, head_sales)]
 
 
-def _known_non_person(record: dict[str, Any]) -> bool:
+def _known_non_person(record: dict[str, Any], head_sales: bool) -> bool:
     record_type = _clean(record.get("type")).upper()
     object_type = _clean(record.get("object")).upper()
-    if _is_unipile_profile(record):
+    if head_sales and _is_unipile_profile(record, head_sales):
         provider = _clean(record.get("provider")).upper()
         specifics = record.get("specifics")
         if provider and provider != "LINKEDIN":
@@ -97,14 +97,17 @@ def _looks_like_profile(record: dict[str, Any]) -> bool:
     return bool(profile_keys.intersection(record))
 
 
-def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
+def normalize_candidate(profile: dict[str, Any], index: int, *, head_sales: bool = False) -> dict[str, Any]:
     specifics = _linkedin_specifics(profile)
     experience_items, current_positions = _experience_items(profile, specifics)
-    is_unipile = _is_unipile_profile(profile)
+    is_unipile = _is_unipile_profile(profile, head_sales)
+    head_sales_unipile = head_sales and is_unipile
     experiences = [
-        _normalize_experience(exp, i, unipile=is_unipile, current_position=current_positions)
+        _normalize_experience(
+            exp, i, unipile=is_unipile, current_position=current_positions, head_sales=head_sales_unipile
+        )
         for i, exp in enumerate(experience_items)
-        if isinstance(exp, dict) and (exp or not is_unipile)
+        if isinstance(exp, dict) and (exp or not head_sales_unipile)
     ]
     education_items = _first_list(profile.get("education"), specifics.get("education"))
     education = [_format_education(edu) for edu in education_items if isinstance(edu, dict)]
@@ -136,7 +139,7 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
             f"candidate-{index + 1}",
         ),
         "linkedin_url": linkedin_url,
-        "candidate_name": _candidate_name(profile, unipile=is_unipile),
+        "candidate_name": _candidate_name(profile, allow_slug_fallback=not head_sales_unipile),
         "headline": _first_nonempty(profile.get("headline"), profile.get("description")),
         "about": _first_nonempty(profile.get("about"), profile.get("summary"), profile.get("bio")),
         "location": _format_location(_first_value(profile.get("location"), specifics.get("location"))),
@@ -158,8 +161,8 @@ def normalize_candidate(profile: dict[str, Any], index: int) -> dict[str, Any]:
     return candidate
 
 
-def normalize_candidates(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    candidates = [normalize_candidate(profile, index) for index, profile in enumerate(profiles)]
+def normalize_candidates(profiles: list[dict[str, Any]], *, head_sales: bool = False) -> list[dict[str, Any]]:
+    candidates = [normalize_candidate(profile, index, head_sales=head_sales) for index, profile in enumerate(profiles)]
     used_ids: set[str] = set()
     next_suffix: dict[str, int] = {}
     for candidate in candidates:
@@ -330,7 +333,7 @@ def merge_duplicate_experiences(experiences: list[dict[str, Any]]) -> list[dict[
 
 
 def _normalize_experience(
-    exp: dict[str, Any], index: int, *, unipile: bool = False, current_position: bool = False
+    exp: dict[str, Any], index: int, *, unipile: bool = False, current_position: bool = False, head_sales: bool = False
 ) -> dict[str, Any]:
     start_value = _first_raw(exp, "startDate", "start", "started_on")
     end_value = _first_raw(exp, "endDate", "end", "ended_on")
@@ -345,9 +348,8 @@ def _normalize_experience(
     # ``ended_on: null``. Both shapes mean the role is open-ended.
     unipile_open_ended = (
         unipile
-        and explicit_current is not False
         and end_value in (None, "")
-        and bool(start_date)
+        and (bool(start_date) and explicit_current is not False if head_sales else start_value not in (None, ""))
     )
     return {
         "index": index,
@@ -517,7 +519,7 @@ def _date_range(start: str, end: str) -> str:
     return start or end or ""
 
 
-def _candidate_name(profile: dict[str, Any], *, unipile: bool = False) -> str:
+def _candidate_name(profile: dict[str, Any], *, allow_slug_fallback: bool) -> str:
     first_last = " ".join(
         part
         for part in [
@@ -531,7 +533,8 @@ def _candidate_name(profile: dict[str, Any], *, unipile: bool = False) -> str:
         profile.get("fullName"),
         profile.get("display_name"),
         profile.get("name"),
-        profile.get("publicIdentifier") if not unipile else "",
+        profile.get("publicIdentifier") if allow_slug_fallback else "",
+        profile.get("public_identifier") if allow_slug_fallback else "",
     )
 
 
@@ -593,14 +596,14 @@ def _experience_items(
     return [], False
 
 
-def _is_unipile_profile(profile: dict[str, Any]) -> bool:
+def _is_unipile_profile(profile: dict[str, Any], head_sales: bool) -> bool:
     if _clean(profile.get("provider")).casefold() == "linkedin":
         return True
     if _clean(profile.get("object")).casefold() in {
         "userprofile", "peoplesearchresult", "linkedinjobapplicant", "searchresult"
     }:
         return True
-    if _clean(profile.get("type")).casefold() == "people":
+    if head_sales and _clean(profile.get("type")).casefold() == "people":
         return True
     return any(
         key in profile

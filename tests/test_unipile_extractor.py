@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 
 import pytest
 
+from app import _load_inputs
 from candidate_evaluator.extractor import (
     candidate_input_issue,
     candidate_input_issues,
@@ -38,7 +40,7 @@ def _sde3_issue(candidate: dict) -> str:
 @pytest.mark.parametrize("bom", ["", "\ufeff"])
 def test_unipile_upload_formats(wrap, bom) -> None:
     profile = {"object": "UserProfile", "display_name": "Asha Rao", "public_identifier": "asha"}
-    assert load_profiles_from_text(bom + json.dumps(wrap(profile))) == [profile]
+    assert load_profiles_from_text(bom + json.dumps(wrap(profile)), head_sales=True) == [profile]
 
 
 @pytest.mark.parametrize(
@@ -47,7 +49,7 @@ def test_unipile_upload_formats(wrap, bom) -> None:
 )
 def test_invalid_export_reports_input_error(payload) -> None:
     with pytest.raises(ValueError):
-        load_profiles_from_text(json.dumps(payload))
+        load_profiles_from_text(json.dumps(payload), head_sales=True)
 
 
 @pytest.mark.parametrize(
@@ -60,8 +62,8 @@ def test_invalid_export_reports_input_error(payload) -> None:
 )
 def test_non_candidate_profiles_are_ignored(record) -> None:
     person = {"object": "UserProfile", "type": "individual", "display_name": "Asha Rao"}
-    assert load_profiles_from_text(json.dumps(record)) == []
-    assert load_profiles_from_text(json.dumps([record, person])) == [person]
+    assert load_profiles_from_text(json.dumps(record), head_sales=True) == []
+    assert load_profiles_from_text(json.dumps([record, person]), head_sales=True) == [person]
 
 
 @pytest.mark.parametrize(
@@ -77,14 +79,18 @@ def test_non_candidate_profiles_are_ignored(record) -> None:
 )
 def test_unipile_open_ended_dates_and_empty_experience_entries(dates, current) -> None:
     candidate = normalize_candidate(
-        {"object": "UserProfile", "work_experience": [{}, None, {"position": "Sales Lead", **dates}]}, 0
+        {"object": "UserProfile", "work_experience": [{}, None, {"position": "Sales Lead", **dates}]},
+        0,
+        head_sales=True,
     )
     assert len(candidate["experiences"]) == 1
     assert candidate["experiences"][0]["is_current"] is current
 
 
 def test_head_sales_skips_unipile_record_without_a_name() -> None:
-    candidate = normalize_candidate({"object": "UserProfile", "public_identifier": "candidate-slug"}, 0)
+    candidate = normalize_candidate(
+        {"object": "UserProfile", "public_identifier": "candidate-slug"}, 0, head_sales=True
+    )
     role = get_role_profile("head_sales")
     assert candidate["linkedin_url"] == "https://www.linkedin.com/in/candidate-slug/"
     assert "candidate name is empty" in candidate_input_issue(
@@ -133,7 +139,8 @@ def test_head_sales_receives_equivalent_apify_and_unipile_model_payloads(version
             }],
         }
     role = get_role_profile("head_sales")
-    [candidate] = normalize_candidates(load_profiles_from_text(json.dumps({"data": unipile})))
+    profiles = load_profiles_from_text(json.dumps({"data": unipile}), head_sales=True)
+    [candidate] = normalize_candidates(profiles, head_sales=True)
     assert candidate_input_issue(
         candidate, role.key, role.evidence_sources, role.require_experience, role.skip_if_no_evidence
     ) == ""
@@ -143,6 +150,38 @@ def test_head_sales_receives_equivalent_apify_and_unipile_model_payloads(version
         "LinkedIn Profile ID", "LinkedIn URL", "Candidate Name", "Location", "Headline", "About", "experiences",
     }
     assert set(payload["experiences"][0]) == set(role.experience_fields)
+
+
+@pytest.mark.parametrize("from_path", [False, True])
+def test_app_applies_unipile_import_changes_only_to_head_sales(tmp_path, from_path) -> None:
+    profile = {
+        "object": "UserProfile",
+        "public_identifier": "candidate-slug",
+        "work_experience": [{}, {"position": "Sales Lead", "start": "2020", "is_current": False}],
+    }
+    contents = json.dumps({"items": [profile]}).encode("utf-8")
+    path = tmp_path / "profiles.json"
+    path.write_bytes(contents)
+    upload = None if from_path else BytesIO(contents)
+    sample_path = str(path) if from_path else ""
+
+    [head_sales], _ = _load_inputs(upload, sample_path, None, "", "head_sales")
+    assert head_sales["candidate_name"] == ""
+    assert len(head_sales["experiences"]) == 1
+    assert head_sales["experiences"][0]["is_current"] is False
+
+    for role_key in ("design", "sde3", "zeiss_visiogen", "custom"):
+        [candidate], _ = _load_inputs(upload, sample_path, None, "", role_key)
+        assert candidate["candidate_name"] == "candidate-slug"
+        assert len(candidate["experiences"]) == 2
+        assert candidate["experiences"][1]["is_current"] is True
+
+
+def test_other_roles_keep_previous_supported_json_wrappers() -> None:
+    profile = {"object": "UserProfile", "public_identifier": "candidate-slug"}
+    assert load_profiles_from_text(json.dumps({"items": [profile]})) == [profile]
+    with pytest.raises(ValueError):
+        load_profiles_from_text(json.dumps({"data": profile}))
 
 
 def test_unipile_v1_full_profile_maps_to_existing_internal_contract() -> None:

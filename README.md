@@ -25,9 +25,14 @@ Use **Evaluation role** to choose the scoring mode:
 - **AI Engineer TRJ** uses the bundled 100-point AI and automation rubric, including capability-specific evidence, recency and duration scoring, evidence warnings, and deterministic rank numbers.
 - **Head Sales** uses a user-uploaded rubric and a fixed 60-point component-scoring contract. The model returns Evidence, Impact, and Duration points; Python calculates weighted capability scores, the final score, and deterministic rank numbers.
 - **SDE3** uses the bundled 62-point Agentic AI Technical Lead rubric. Python prepares the date and duration inputs, the model applies the rubric, Python validates and calculates the scores, and a separate request explains those fixed scores.
+- **FE orange** uses the bundled Founding AI Engineer rubric, worth 133 points. C1 (shipped agentic/LLM product) and C10 (backend/full-stack engineering) use Evidence + Recency + Duration; C2-C9 use Evidence only. Python applies the ten multipliers and calculates the total and rank. The model returns 14 raw components, up to three evidence points, uncertainties, and a rationale capped at 50 words.
 - **Custom Role** creates a validated scoring contract from a role name, scoring categories, category maxima, optional discrete scores, outcome bands, and permitted LinkedIn evidence sources.
 
 Backend Engineer automatically loads `rubrics/backend_engineer.md`, AI Engineer TRJ automatically loads `rubrics/ai_engineer_trj.md`, and SDE3 automatically loads `rubrics/sde3.md`. You may still upload a replacement rubric, but it must preserve the selected role's scoring categories and output contract.
+
+FE orange automatically loads `rubrics/fe_orange.md`, the supplied Founding AI Engineer LinkedIn rubric. An uploaded replacement takes precedence for new runs; its C1-C10 scoring table must retain the configured raw maxima, multipliers, and 133-point maximum. Changing calculation rules requires matching application changes. Project dates are retained for FE orange; role dates and project dates are prepared as inputs, while capability relevance, overlap, source caps, and the C10 full-time internship rule remain rubric judgments. Missing user counts are reported as unverified, without adding an automatic rejection threshold.
+
+FE orange exports the rubric's 21 requested fields, then the ten calculated capability scores, Final Score (/133), and Rank Number. Candidates sort by final score, then C1-C10 scores in rubric order, then name alphabetically for deterministic ties. Saved runs retain the role, candidate data (including project dates), and rubric used when the run started.
 
 Head Sales does not load a bundled rubric. Select the role and upload a compatible Markdown rubric for every new run.
 

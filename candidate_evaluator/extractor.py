@@ -97,7 +97,9 @@ def _looks_like_profile(record: dict[str, Any]) -> bool:
     return bool(profile_keys.intersection(record))
 
 
-def normalize_candidate(profile: dict[str, Any], index: int, *, head_sales: bool = False) -> dict[str, Any]:
+def normalize_candidate(
+    profile: dict[str, Any], index: int, *, head_sales: bool = False, include_project_dates: bool = False
+) -> dict[str, Any]:
     specifics = _linkedin_specifics(profile)
     experience_items, current_positions = _experience_items(profile, specifics)
     is_unipile = _is_unipile_profile(profile, head_sales)
@@ -148,7 +150,9 @@ def normalize_candidate(profile: dict[str, Any], index: int, *, head_sales: bool
         ),
         "website": _first_website(profile.get("websites")),
         "education": education,
-        "projects": _normalize_projects(_first_list(profile.get("projects"), specifics.get("projects"))),
+        "projects": _normalize_projects(
+            _first_list(profile.get("projects"), specifics.get("projects")), include_dates=include_project_dates
+        ),
         "experiences": experiences,
         "open_to_work": open_to_work,
         "open_to_work_present": open_to_work_present,
@@ -161,8 +165,13 @@ def normalize_candidate(profile: dict[str, Any], index: int, *, head_sales: bool
     return candidate
 
 
-def normalize_candidates(profiles: list[dict[str, Any]], *, head_sales: bool = False) -> list[dict[str, Any]]:
-    candidates = [normalize_candidate(profile, index, head_sales=head_sales) for index, profile in enumerate(profiles)]
+def normalize_candidates(
+    profiles: list[dict[str, Any]], *, head_sales: bool = False, include_project_dates: bool = False
+) -> list[dict[str, Any]]:
+    candidates = [
+        normalize_candidate(profile, index, head_sales=head_sales, include_project_dates=include_project_dates)
+        for index, profile in enumerate(profiles)
+    ]
     used_ids: set[str] = set()
     next_suffix: dict[str, int] = {}
     for candidate in candidates:
@@ -375,7 +384,7 @@ def _normalize_experience(
     }
 
 
-def _normalize_projects(value: Any) -> list[dict[str, Any]]:
+def _normalize_projects(value: Any, *, include_dates: bool = False) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     projects: list[dict[str, Any]] = []
@@ -392,7 +401,19 @@ def _normalize_projects(value: Any) -> list[dict[str, Any]]:
             "description": _clean(_first_nonempty(item.get("description"), item.get("summary"))),
             "technologies": _normalize_project_technologies(item),
         }
-        if any(_has_normalized_value(field) for field in project.values()):
+        if include_dates:
+            start = _format_date(_first_raw(item, "startDate", "start_date", "start", "started_on"))
+            end = _format_date(_first_raw(item, "endDate", "end_date", "end", "ended_on"))
+            project.update(
+                start_date=start,
+                end_date=end,
+                is_current=(
+                    _first_raw(item, "isCurrent", "is_current", "current") is True
+                    or end.casefold() in {"present", "current"}
+                ),
+                duration=_clean(item.get("duration")),
+            )
+        if any(_has_normalized_value(project[field]) for field in ("name", "description", "technologies")):
             projects.append(project)
     return projects
 

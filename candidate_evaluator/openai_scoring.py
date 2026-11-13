@@ -127,6 +127,14 @@ def evaluate_candidates(
             grading = item.get("grading")
             if not isinstance(grading, dict):
                 raise TypeError("An evaluation grading field is not a JSON object.")
+            if role.key == "fe_orange":
+                invalid = [
+                    f"{column} must be an explicit JSON integer from 0 to {maximum}"
+                    for column, maximum in role.component_score_maxima.items()
+                    if type(grading.get(column)) is not int or not 0 <= grading[column] <= maximum
+                ]
+                if invalid:
+                    item = {**item, "evaluation_error": "; ".join(invalid)}
             if format_repaired:
                 item = {**item, "_response_format_repaired": True}
             results.append((grading, item))
@@ -343,7 +351,7 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "sde3"}:
+    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "sde3", "fe_orange"}:
         experiences = merge_duplicate_experiences(experiences)
     candidate = {**candidate, "experiences": experiences}
     payload = {
@@ -372,10 +380,14 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
             {field: experience.get(field) for field in role.experience_fields if field in experience}
             for experience in filtered_payload["experiences"]
         ]
-    if role.key == "sde3" and filtered_payload.get("experiences"):
+    if role.key in {"sde3", "fe_orange"} and filtered_payload.get("experiences"):
         from .dates import prepare_experience_dates
 
         filtered_payload["experiences"] = prepare_experience_dates(filtered_payload["experiences"], date.today())
+    if role.key == "fe_orange" and filtered_payload.get("Projects"):
+        from .dates import prepare_experience_dates
+
+        filtered_payload["Projects"] = prepare_experience_dates(filtered_payload["Projects"], date.today())
     return filtered_payload
 
 

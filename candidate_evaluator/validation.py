@@ -34,11 +34,13 @@ def limit_rationale(text: str, max_words: int = SDE3_RATIONALE_MAX_WORDS) -> str
 def normalize_rationale_row(
     row: dict[str, Any], role_or_key: str | RoleProfile = "design"
 ) -> dict[str, Any]:
-    """Cap user-visible SDE3 rationale on a copy, preserving numeric scores."""
+    """Cap rationale for roles with export-time limits, preserving numeric scores."""
     role = _resolve_role(role_or_key)
     normalized = dict(row)
-    if role.key == "sde3" and "Score Rationale" in normalized:
-        normalized["Score Rationale"] = limit_rationale(str(normalized["Score Rationale"] or ""))
+    if role.key in {"sde3", "fe_orange"} and "Score Rationale" in normalized:
+        normalized["Score Rationale"] = limit_rationale(
+            str(normalized["Score Rationale"] or ""), max_words=role.rationale_max_words
+        )
     return normalized
 
 

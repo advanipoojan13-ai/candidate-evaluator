@@ -528,9 +528,11 @@ FE_ORANGE_GRADING_COLUMNS = [
     "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
     *FE_ORANGE_CATEGORY_SCORES, "Final Score (/133)",
 ]
-# Preserve all 21 fields in the supplied rubric, followed by calculated scores and rank.
+# Keep component points in saved grading data; show one weighted score per capability.
 FE_ORANGE_OUTPUT_COLUMNS = [
-    "Candidate", "Profile URL", *FE_ORANGE_GRADING_COLUMNS, "Rank Number",
+    "Rank Number", "Candidate", "Profile URL", "Current Company", "Current Title",
+    *FE_ORANGE_CATEGORY_SCORES, "Final Score (/133)",
+    "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
 ]
 
 

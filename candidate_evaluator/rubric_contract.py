@@ -10,7 +10,15 @@ from .roles import FE_ORANGE_CAPABILITIES, RoleProfile
 def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
     if role.key == "fe_orange":
         return _fe_orange_rubric_issue(rubric_text)
+    if role.key == "peeko2":
+        from . import peeko2
+
+        if not all(column in rubric_text for column in (*peeko2.SCORE_COLUMNS, peeko2.TOTAL_COLUMN)):
+            return "Upload the simplified Peeko2 LinkedIn rubric with a 36-point total."
+        return ""
     if role.key == "peeko":
+        if "Final Score (/36)" in rubric_text:
+            return "Select Peeko2 for the simplified 36-point LinkedIn rubric."
         if not all(re.search(rf"\bLC[-\s]+{number}\b", rubric_text, re.IGNORECASE) for number in range(1, 6)) or re.search(
             r"\bLC[-\s]+6\b", rubric_text, re.IGNORECASE
         ):

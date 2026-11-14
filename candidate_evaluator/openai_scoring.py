@@ -351,8 +351,8 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "peeko", "sde3", "fe_orange"}:
-        experiences = merge_duplicate_experiences(experiences, preserve_employment_details=role.key == "peeko")
+    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "peeko", "peeko2", "sde3", "fe_orange"}:
+        experiences = merge_duplicate_experiences(experiences, preserve_employment_details=role.key in {"peeko", "peeko2"})
     candidate = {**candidate, "experiences": experiences}
     payload = {
         "LinkedIn Profile ID": candidate.get("linkedin_profile_id", ""),
@@ -444,8 +444,10 @@ def _batch_response_schema(role: RoleProfile) -> dict[str, Any]:
 
 
 def _response_schema(role: RoleProfile) -> dict[str, Any]:
-    if role.key == "peeko":
-        from .peeko import grading_schema
+    if role.key in {"peeko", "peeko2"}:
+        from . import peeko, peeko2
+
+        grading_schema = (peeko2 if role.key == "peeko2" else peeko).grading_schema
 
         return {
             "type": "object",

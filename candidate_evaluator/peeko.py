@@ -305,12 +305,13 @@ def _yes_no(condition):
     return "Yes" if condition else "No"
 
 
-def write_excel(frame, destination):
+def write_excel(frame, destination, score_columns=None):
     """Preserve numeric cells and display Peeko scores to two decimal places."""
     from pandas import ExcelWriter
 
     legacy = list(frame.columns) == LEGACY_OUTPUT_COLUMNS
-    score_columns = LEGACY_OUTPUT_COLUMNS[5:12] if legacy else (*SCORE_COLUMNS, TOTAL_COLUMN)
+    if score_columns is None:
+        score_columns = list(frame.columns)[5:12 if legacy else 11]
     with ExcelWriter(destination, engine="openpyxl") as writer:
         frame.to_excel(writer, index=False)
         worksheet = writer.sheets["Sheet1"]

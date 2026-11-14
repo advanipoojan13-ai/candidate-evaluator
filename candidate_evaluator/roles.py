@@ -4,7 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from . import peeko
+from . import peeko, peeko2
 from .constants import SOURCE_COLUMNS
 from .evidence import (
     CUSTOM_EVIDENCE_SOURCES,
@@ -819,6 +819,49 @@ ROLE_PROFILES = {
             "start_date", "end_date", "is_current", "duration", "experience_skills",
         ],
     ),
+    "peeko2": RoleProfile(
+        key="peeko2",
+        label="Peeko2",
+        role_name="Performance Marketer (User Acquisition)",
+        grading_columns=[*peeko2.OUTPUT_COLUMNS, "Peeko2 Audit"],
+        category_scores=OrderedDict(zip(peeko2.SCORE_COLUMNS, peeko2.MAXIMA)),
+        allowed_scores={},
+        total_column=peeko2.TOTAL_COLUMN,
+        total_max=sum(peeko2.MAXIMA),
+        outcome_column="Rank Number",
+        outcome_bands=[],
+        evidence_confidence_values=[],
+        system_prompt="Evaluate LinkedIn evidence using the simplified Peeko2 rubric.",
+        instructions=[
+            "Return platform levels and evidence decisions. Python calculates Recency, scores, cutoff and Review.",
+            "For Google and Meta independently return none, mention or hands_on, with the supporting source. "
+            "Recognise named platforms in skills, tools, headline and experience. Mentions alone do not establish hands-on work.",
+            "Use the highest supported tier per criterion. Use null components for none. "
+            "For qualifying hands-on work award Evidence 4 for a role description or 3 for About/Headline. "
+            "For LC-3 app_mention and LC-5 keyword_only return Evidence 1, cite the source and leave the recency index null.",
+            "For Recency return the supplied index of the latest dated Experience description supporting the selected tier. "
+            "Use null when there is no such description. Return no durations or work periods.",
+            "For quantified metrics return the named metric and measured result; include the candidate action for quantified improvement. "
+            "Use null for unavailable metric details. Flag an unspecified destination only for website_campaign.",
+            "Use up to three strongest evidence facts separated by | and a rationale of at most 50 words.",
+        ],
+        internal_role_flag_name="relevant_peeko2_role",
+        internal_role_evidence_name="peeko2_evidence_extracted",
+        export_columns=peeko2.OUTPUT_COLUMNS,
+        numeric_scores=True,
+        ranked=True,
+        column_enums={column: ["Yes", "No"] for column in (
+            peeko.CUTOFF_COLUMN, peeko.REVIEW_COLUMN, *peeko.WARNING_COLUMNS,
+        )},
+        strongest_evidence_columns=["Strongest Evidence"],
+        rationale_max_words=50,
+        evidence_sources=["Headline", "About", "All experiences", "Skills"],
+        skip_if_no_evidence=False,
+        experience_fields=[
+            "index", "company_name", "position_or_title", "description", "employment_type",
+            "start_date", "end_date", "is_current", "experience_skills", "experience_tools",
+        ],
+    ),
     "peeko": RoleProfile(
         key="peeko",
         label="Peeko",
@@ -1000,7 +1043,7 @@ def prepare_output_rows(
         previous_total = None
         for index, row in enumerate(prepared, start=1):
             total = _number(row.get(role.total_column))
-            if role.key != "peeko" or total != previous_total:
+            if role.key not in {"peeko", "peeko2"} or total != previous_total:
                 rank = index
             row[role.outcome_column] = rank
             previous_total = total

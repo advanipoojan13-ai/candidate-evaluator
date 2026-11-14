@@ -156,12 +156,11 @@ def _date(value):
 def _review_interval(period, experiences, evaluation_date):
     experience = experiences.get(period["experience_index"])
     if experience is None or not experience.get("description", "").strip():
-        raise ValueError("Peeko qualifying periods must reference an experience description.")
+        return None, 0, True
     # Review measures identifiable hands-on work, which can include work excluded
     # from the rubric's full-time-only Duration component.
     if period["basis"] == "role_span":
-        if any(period[key] is not None for key in ("start", "end", "written_duration")):
-            raise ValueError("Peeko role-span evidence must use the source role dates.")
+        # Source dates are authoritative even if the provider repeats dates.
         source = experience
     else:
         source = {

@@ -372,6 +372,7 @@ def _default_rubric_path(role_key: str) -> str:
         "ai_engineer_trj": "ai_engineer_trj.md",
         "sde3": "sde3.md",
         "fe_orange": "fe_orange.md",
+        "peeko2": "peeko2.md",
     }
     if role_key in bundled_rubrics:
         bundled = Path(__file__).parent / "rubrics" / bundled_rubrics[role_key]
@@ -386,7 +387,7 @@ def _load_inputs(
     rubric_text = ""
     head_sales = role_key == "head_sales"
     include_project_dates = role_key == "fe_orange"
-    peeko = role_key == "peeko"
+    peeko = role_key in {"peeko", "peeko2"}
     try:
         if json_upload is not None:
             candidates = _candidates_from_json_text(
@@ -1091,9 +1092,9 @@ def _rows_to_csv_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
-    from candidate_evaluator import peeko
-    if columns == peeko.OUTPUT_COLUMNS:
-        score_columns = (*peeko.SCORE_COLUMNS, peeko.TOTAL_COLUMN)
+    from candidate_evaluator import peeko, peeko2
+    if columns in (peeko.OUTPUT_COLUMNS, peeko2.OUTPUT_COLUMNS):
+        score_columns = columns[5:11]
         rows = [
             {**row, **{column: f"{row[column]:.2f}" for column in score_columns}}
             for row in rows
@@ -1109,9 +1110,9 @@ def _rows_to_xlsx_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes
     # Build from the currently normalized rows, rather than a saved workbook
     # whose prose or scores may predate the displayed evaluation.
     frame = pd.DataFrame(rows, columns=columns)
-    from candidate_evaluator import peeko
+    from candidate_evaluator import peeko, peeko2
 
-    if columns in (peeko.OUTPUT_COLUMNS, peeko.LEGACY_OUTPUT_COLUMNS):
+    if columns in (peeko.OUTPUT_COLUMNS, peeko.LEGACY_OUTPUT_COLUMNS, peeko2.OUTPUT_COLUMNS):
         peeko.write_excel(frame, buffer)
     else:
         frame.to_excel(buffer, index=False, engine="openpyxl")

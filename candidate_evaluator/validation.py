@@ -173,13 +173,15 @@ def apply_calculated_fields(
 ) -> dict[str, Any]:
     """Add fields that are more reliable and cheaper to calculate in Python."""
     role = _resolve_role(role_or_key)
-    if role.key == "peeko":
-        from .peeko import calculate_grading, grading_schema
+    if role.key in {"peeko", "peeko2"}:
+        from . import peeko, peeko2
+
+        scoring = peeko2 if role.key == "peeko2" else peeko
 
         # The run path combines source and provider fields for legacy roles.
         # Peeko derives identity directly from the source candidate.
-        return calculate_grading(
-            {key: row[key] for key in grading_schema()["required"] if key in row}, candidate, date.today(),
+        return scoring.calculate_grading(
+            {key: row[key] for key in scoring.grading_schema()["required"] if key in row}, candidate, date.today(),
         )
     calculated = dict(row)
 

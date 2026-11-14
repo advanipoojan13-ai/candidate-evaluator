@@ -473,8 +473,8 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.output_columns)
     csv_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.csv"
     xlsx_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
-    frame.to_csv(csv_path, index=False, float_format="%.2f" if role.key == "peeko" else None)
-    if role.key == "peeko":
+    frame.to_csv(csv_path, index=False, float_format="%.2f" if role.key in {"peeko", "peeko2"} else None)
+    if role.key in {"peeko", "peeko2"}:
         from .peeko import write_excel
 
         write_excel(frame, xlsx_path)

@@ -101,13 +101,48 @@ def test_filtered_payload_preserves_qualifying_fields_and_merges_duplicates():
     role = get_role_profile("peeko")
     payload = _candidate_payload(normalized, role)
     assert payload["Headline"] == "Marketing" and payload["About"] == "About"
-    assert "Skills" not in payload and "Education" not in payload and "Website" not in payload
+    assert payload["Skills"] == ["Global"] and "Education" not in payload and "Website" not in payload
     first, second = payload["experiences"]
     assert first["description"] == "Built paid campaigns | Managed Meta ads"
     assert first["experience_tools"] == ["Meta Ads"]
     assert first["experience_skills"] == ["Campaigns"]
     assert first["employment_type"] == "Part-time" and first["is_current"]
     assert not second["is_current"]
+
+
+@pytest.mark.parametrize(("global_skills", "attached_skills", "hands_on", "expected"), [
+    (["Digital Marketing", "PPC"], [], False, 0),
+    (["Google Ads"], [], False, 0.3),
+    ([], ["Facebook Ads", "Instagram Ads"], False, 0.3),
+    (["  Google   AdWords "], ["Meta Ads Manager"], False, 1.0),
+    (["Google Ads"], ["Google App Campaigns"], False, 0.3),
+    ([], ["Meta Ads"], True, 1.2),
+])
+def test_skills_only_fallback(grading, global_skills, attached_skills, hands_on, expected):
+    profile = normalize_candidate({
+        "skills": [{"name": name} for name in global_skills],
+        "work_experience": [{
+            "role": "Marketer",
+            "skills": [{"name": name} for name in attached_skills],
+        }],
+    }, 0, peeko=True)
+    if hands_on:
+        grading["google"] = components(4, 0, 0)
+    row = calculate_grading(grading, profile, TODAY)
+    assert row[SCORE_COLUMNS[0]] == expected
+    assert row[TOTAL_COLUMN] == expected
+    assert row[UNVERIFIED_COLUMNS[0]] == ("No" if hands_on else "Yes")
+    assert row[REVIEW_COLUMN] == "Yes"
+    assert validate_output_row(row, "peeko") == []
+
+
+def test_one_off_duration_scoring_does_not_extend_review_period(grading):
+    job = experience(description="Launched a Google and Meta campaign for Diwali.")
+    grading["google"] = grading["meta"] = components(4, 0, 2)
+    row = score(grading, job)
+    assert row[SCORE_COLUMNS[0]] == 6
+    assert row["Peeko Audit"]["hands_on_months"] == 0
+    assert row[REVIEW_COLUMN] == "Yes"
 
 
 @pytest.mark.parametrize(("google", "meta", "expected"), [

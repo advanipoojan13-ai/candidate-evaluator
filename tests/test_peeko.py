@@ -245,6 +245,26 @@ def test_review_counts_only_nonoverlapping_supported_periods(grading, jobs, peri
     assert row["Date-Quality Warning"] == warning
 
 
+def test_review_role_span_uses_source_dates_even_if_provider_supplies_dates(grading):
+    grading.update(google=components(), meta=components(), periods=[
+        span(start="2023-01", end="2023-02", written_duration="1 month"),
+    ])
+    row = score(grading, experience())
+    assert row[TOTAL_COLUMN] == 15
+    assert row["Peeko Audit"]["hands_on_months"] == 24
+    assert row[REVIEW_COLUMN] == "No"
+
+
+@pytest.mark.parametrize("index", [0, 999])
+def test_unsupported_review_period_keeps_score_and_flags_dates(grading, index):
+    grading.update(google=components(), meta=components(), periods=[span(index)])
+    row = score(grading, experience(description=""))
+    assert row[TOTAL_COLUMN] == 15
+    assert row["Peeko Audit"]["hands_on_months"] == 0
+    assert row["Date-Quality Warning"] == "Yes"
+    assert row[REVIEW_COLUMN] == "Yes"
+
+
 def test_unrelated_work_and_one_platform_independently_trigger_review(grading):
     grading.update(google=components(), meta=components(), periods=[span()], unrelated_work=True)
     assert score(grading, experience())[REVIEW_COLUMN] == "Yes"
@@ -257,7 +277,7 @@ def test_unrelated_work_and_one_platform_independently_trigger_review(grading):
 
 @pytest.mark.parametrize("case", [
     "missing", "boolean", "fraction", "invalid_tier", "tier_without_components", "dated_title",
-    "empty_source", "legacy_budget", "dated_metric_keyword", "invalid_review_index",
+    "empty_source", "legacy_budget", "dated_metric_keyword",
     "funnel_without_source", "bad_metric_tier", "missing_metric_change",
 ])
 def test_malformed_provider_fields_are_rejected(grading, case):
@@ -276,8 +296,6 @@ def test_malformed_provider_fields_are_rejected(grading, case):
         grading["budgets"] = []
     elif case == "dated_metric_keyword":
         grading["metrics"].update(tier="keyword_only", metric="CAC", components=components(1, 1, 0))
-    elif case == "invalid_review_index":
-        grading["periods"] = [span(999)]
     elif case == "funnel_without_source":
         grading["funnel"].update(tier="change_implemented", components={**components(), "sources": []})
     elif case == "bad_metric_tier":

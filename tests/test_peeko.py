@@ -94,7 +94,7 @@ def test_filtered_payload_preserves_qualifying_fields_and_merges_duplicates():
             {"role": "Marketer", "start": "2020", "description": "Built paid campaigns"},
             {"role": "Marketer", "start": "2020", "description": "Managed Meta ads", "tools": ["Meta Ads"],
              "skills": [{"name": "Campaigns"}], "employment_type": "Part-time", "is_current": True},
-            {"role": "Second role", "start": "2025"},
+            {"role": "Second role", "start": "2025", "is_current": False},
         ],
     }
     normalized = normalize_candidate(raw, 0, peeko=True)
@@ -108,6 +108,26 @@ def test_filtered_payload_preserves_qualifying_fields_and_merges_duplicates():
     assert first["experience_skills"] == ["Campaigns"]
     assert first["employment_type"] == "Part-time" and first["is_current"]
     assert not second["is_current"]
+
+
+@pytest.mark.parametrize(("source_field", "dates", "expected"), [
+    ("work_experience", {"start": {"year": 2024, "month": 6}}, True),
+    ("work_experience", {"started_on": "2024-06", "ended_on": None}, True),
+    ("work_experience", {"start": "2024-06", "end": "2025-06"}, False),
+    ("work_experience", {"start": "2024-06", "is_current": False}, False),
+    ("work_experience", {"start": "2024-13"}, False),
+    ("work_experience", {"start": "2099-06"}, False),
+    ("work_experience", {}, False),
+    ("experience", {"startDate": "2024-06"}, False),
+    ("experience", {"startDate": "2024-06", "endDate": "Present"}, True),
+])
+def test_current_employment_export(grading, source_field, dates, expected):
+    raw = {source_field: [{"role": "Media Buyer", "company": "Example", **dates}]}
+    profile = normalize_candidate(raw, 0, peeko=True)
+    row = calculate_grading(grading, profile, TODAY)
+    assert profile["experiences"][0]["is_current"] is expected
+    assert row["Current Title"] == ("Media Buyer" if expected else "")
+    assert row["Current Company"] == ("Example" if expected else "")
 
 
 @pytest.mark.parametrize(("global_skills", "attached_skills", "hands_on", "expected"), [
@@ -360,7 +380,7 @@ def test_uploaded_json_and_rubric_use_peeko_importer():
     )
     assert uploaded_rubric == RUBRIC
     assert profile["experiences"][0]["experience_tools"] == ["Google Ads"]
-    assert profile["experiences"][0]["is_current"] is False
+    assert profile["experiences"][0]["is_current"] is True
 
 
 def test_completed_run_persists_component_audit_and_keeps_exact_export_columns(grading, monkeypatch, tmp_path):

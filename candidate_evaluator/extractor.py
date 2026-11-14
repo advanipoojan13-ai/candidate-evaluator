@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional, Union
 
 from .constants import SOURCE_COLUMNS
+from .dates import _parse_date
 from .evidence import has_selected_evidence
 
 
@@ -367,11 +369,23 @@ def _normalize_experience(
     explicit_current = _first_raw(exp, "isCurrent", "is_current", "current")
     # Unipile v1 commonly omits ``end`` for a current role, while v2 returns
     # ``ended_on: null``. Both shapes mean the role is open-ended.
-    unipile_open_ended = (
-        unipile and not peeko
-        and end_value in (None, "")
-        and (bool(start_date) and explicit_current is not False if head_sales else start_value not in (None, ""))
-    )
+    unipile_open_ended = False
+    if unipile and end_value in (None, ""):
+        if peeko:
+            try:
+                parsed_start = _parse_date(start_date)
+            except ValueError:
+                parsed_start = None
+            today = date.today()
+            unipile_open_ended = (
+                explicit_current is not False
+                and parsed_start is not None
+                and date(parsed_start.year, parsed_start.month or 1, parsed_start.day or 1) <= today
+            )
+        elif head_sales:
+            unipile_open_ended = bool(start_date) and explicit_current is not False
+        else:
+            unipile_open_ended = start_value not in (None, "")
     tools = _string_list(_first_list(exp.get("tools"), exp.get("technologies"))) if peeko else []
     return {
         "index": index,

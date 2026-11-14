@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -9,7 +10,10 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from app import _default_rubric_path, _evaluate_candidate_batch_for_run, _load_inputs
+from app import (
+    _default_rubric_path, _evaluate_candidate_batch_for_run, _load_inputs,
+    _rows_to_csv_bytes, _rows_to_xlsx_bytes,
+)
 from candidate_evaluator import openai_scoring, progress
 from candidate_evaluator.extractor import normalize_candidate
 from candidate_evaluator.openai_scoring import _candidate_payload, _response_schema
@@ -175,7 +179,7 @@ def test_invalid_component_fails_only_affected_candidate(monkeypatch, bad):
     assert "explicit JSON integer" in results[1]["error"]
 
 
-def test_resume_exports_preserve_components_scores_rubric_and_fifty_word_limit(tmp_path, monkeypatch):
+def test_resume_keeps_internal_components_but_exports_only_final_scores(tmp_path, monkeypatch):
     monkeypatch.setattr(progress, "RUNS_DIR", str(tmp_path / "runs"))
     monkeypatch.setattr(progress, "OUTPUTS_DIR", str(tmp_path / "outputs"))
     person = candidate()
@@ -187,13 +191,35 @@ def test_resume_exports_preserve_components_scores_rubric_and_fifty_word_limit(t
     progress.mark_completed("fe-run", person["linkedin_profile_id"], completed, {})
     assert progress.role_for_run("fe-run").key == "fe_orange"
     assert (progress.run_dir("fe-run") / "rubric.md").read_text() == RUBRIC
-    csv, xlsx = progress.save_exports("fe-run", progress.result_rows("fe-run"))
+    saved = progress.result_rows("fe-run")
+    assert saved[0]["C1 Evidence (0-4)"] == 4
+    csv, xlsx = progress.save_exports("fe-run", saved)
     for frame in (pd.read_csv(csv), pd.read_excel(xlsx)):
         assert list(frame.columns) == ROLE.output_columns
-        assert frame.iloc[0]["C1 Evidence (0-4)"] == 4
+        assert set(ROLE.component_score_maxima).isdisjoint(frame.columns)
         assert frame.iloc[0][ROLE.total_column] == 133
         assert frame.iloc[0]["Rank Number"] == 1
         assert len(frame.iloc[0]["Score Rationale"].split()) == 50
+
+
+def test_five_candidates_have_one_row_each_and_one_score_column_per_skill():
+    # Saved rows from the original release still contain all 14 raw components.
+    # Both frontend downloads must project those rows to the corrected output.
+    full = row(grading(maximum=True))
+    candidates = [
+        {**full, "Candidate": f"Engineer {index}", "Profile URL": f"https://linkedin.com/in/person-{index}"}
+        for index in range(5)
+    ]
+    visible = prepare_output_rows(candidates, ROLE)
+    csv = _rows_to_csv_bytes(visible, ROLE.output_columns)
+    excel = _rows_to_xlsx_bytes(visible, ROLE.output_columns)
+    for frame in (pd.DataFrame(visible), pd.read_csv(io.BytesIO(csv)), pd.read_excel(io.BytesIO(excel))):
+        assert frame.shape == (5, 19)
+        assert frame.columns.is_unique
+        assert frame["Profile URL"].is_unique
+        assert set(ROLE.component_score_maxima).isdisjoint(frame.columns)
+        assert len([column for column in frame.columns if column in ROLE.category_scores]) == 10
+        assert all(frame[ROLE.total_column] == 133)
 
 
 def test_ranking_uses_total_then_priority_scores_and_name():

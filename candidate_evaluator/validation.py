@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
@@ -172,6 +173,14 @@ def apply_calculated_fields(
 ) -> dict[str, Any]:
     """Add fields that are more reliable and cheaper to calculate in Python."""
     role = _resolve_role(role_or_key)
+    if role.key == "peeko":
+        from .peeko import calculate_grading, grading_schema
+
+        # The run path combines source and provider fields for legacy roles.
+        # Peeko derives identity directly from the source candidate.
+        return calculate_grading(
+            {key: row[key] for key in grading_schema()["required"] if key in row}, candidate, date.today(),
+        )
     calculated = dict(row)
 
     for category_column, rule in (role.component_scoring or {}).items():

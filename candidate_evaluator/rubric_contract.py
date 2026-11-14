@@ -10,6 +10,10 @@ from .roles import FE_ORANGE_CAPABILITIES, RoleProfile
 def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
     if role.key == "fe_orange":
         return _fe_orange_rubric_issue(rubric_text)
+    if role.key == "peeko":
+        if not all(re.search(rf"\bLC[-\s]+{number}\b", rubric_text, re.IGNORECASE) for number in range(1, 7)):
+            return "Upload the Peeko LinkedIn rubric with criteria LC-1 through LC-6."
+        return ""
     if role.key != "sde3":
         return ""
     text = unicodedata.normalize("NFKC", rubric_text).casefold()

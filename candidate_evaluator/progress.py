@@ -463,7 +463,12 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     csv_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.csv"
     xlsx_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
     frame.to_csv(csv_path, index=False)
-    frame.to_excel(xlsx_path, index=False)
+    if role.key == "peeko":
+        from .peeko import write_excel
+
+        write_excel(frame, xlsx_path)
+    else:
+        frame.to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
 
 

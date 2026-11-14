@@ -4,6 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from . import peeko
 from .constants import SOURCE_COLUMNS
 from .evidence import (
     CUSTOM_EVIDENCE_SOURCES,
@@ -818,6 +819,62 @@ ROLE_PROFILES = {
             "start_date", "end_date", "is_current", "duration", "experience_skills",
         ],
     ),
+    "peeko": RoleProfile(
+        key="peeko",
+        label="Peeko",
+        role_name="Performance Marketer (User Acquisition)",
+        grading_columns=[*peeko.OUTPUT_COLUMNS, "Peeko Audit"],
+        category_scores=OrderedDict.fromkeys(peeko.SCORE_COLUMNS[:4], 10),
+        allowed_scores={},
+        total_column=peeko.TOTAL_COLUMN,
+        total_max=40,
+        outcome_column="Rank Number",
+        outcome_bands=[],
+        evidence_confidence_values=[],
+        system_prompt="You evaluate LinkedIn evidence for the Peeko Performance Marketer role.",
+        instructions=[
+            "Return evidence decisions and component points only. The application computes weights, "
+            "annual budget points, totals, cutoff, warnings, review routing and rank.",
+            "Return google and meta independently as null or as supported components. "
+            "For ownership and conversion select the highest supported tier; use null components for none.",
+            "For each component set, sources must identify the source experience index or About/Headline "
+            "and give the supporting action. Follow the rubric's Evidence, Recency and Duration rules.",
+            "For budgets return each qualifying personally managed amount, in rupees as a decimal string "
+            "using a stated INR equivalent if applicable, and the original recurring period. "
+            "Use the lower bound of ranges, include explicitly supported zero, and give the source. "
+            "Do not annualise amounts, infer currency, sum budgets, or treat isolated spend as recurring.",
+            "For funnel and metrics return the rubric score and supporting source. Include named metric, "
+            "reported numeric value, action, improvement, baseline and second metric when available. "
+            "Use null for unavailable details.",
+            "In periods list all identifiable dated hands-on work across LC-1 to LC-3 for the Review check, "
+            "including qualifying lower tiers. Reference supplied experience indices. "
+            "Use role_span only for explicitly ongoing work and leave its date fields null. "
+            "Use stated_period with the dates/duration actually given for time-bounded work. "
+            "Never substitute the full role span for a one-off result.",
+            "Mark unrelated_work only when unrelated work is explicit. Mark destination_unverified only "
+            "for an unspecified destination in the website campaign-work tier. For date_quality_warning "
+            "flag unreliable dates relevant to scoring; Python also checks source dates.",
+            "Return up to three short Strongest Evidence facts separated by ' | ', with source and action "
+            "or result. State material gaps neutrally and explain the strongest evidence and main "
+            "uncertainty in Score Rationale in at most 50 words.",
+        ],
+        internal_role_flag_name="relevant_peeko_role",
+        internal_role_evidence_name="peeko_evidence_extracted",
+        export_columns=peeko.OUTPUT_COLUMNS,
+        numeric_scores=True,
+        ranked=True,
+        column_enums={column: ["Yes", "No"] for column in (
+            peeko.CUTOFF_COLUMN, peeko.REVIEW_COLUMN, *peeko.WARNING_COLUMNS,
+        )},
+        strongest_evidence_columns=["Strongest Evidence"],
+        rationale_max_words=50,
+        evidence_sources=["Headline", "About", "All experiences"],
+        skip_if_no_evidence=False,
+        experience_fields=[
+            "index", "company_name", "position_or_title", "description", "employment_type",
+            "start_date", "end_date", "is_current", "duration", "experience_skills", "experience_tools",
+        ],
+    ),
     "sde3": RoleProfile(
         key="sde3",
         label="SDE3",
@@ -934,8 +991,14 @@ def prepare_output_rows(
             return (*numeric, str(row.get("Candidate", "")).casefold())
 
         prepared.sort(key=rank_key)
+        rank = 0
+        previous_total = None
         for index, row in enumerate(prepared, start=1):
-            row[role.outcome_column] = index
+            total = _number(row.get(role.total_column))
+            if role.key != "peeko" or total != previous_total:
+                rank = index
+            row[role.outcome_column] = rank
+            previous_total = total
     return [{column: row.get(column, "") for column in role.output_columns} for row in prepared]
 
 

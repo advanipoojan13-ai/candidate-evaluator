@@ -838,7 +838,14 @@ ROLE_PROFILES = {
             "Return google and meta independently as null or as supported components. "
             "For ownership and conversion select the highest supported tier; use null components for none.",
             "For each component set, sources must identify the source experience index or About/Headline "
-            "and give the supporting action. Follow the rubric's Evidence, Recency and Duration rules.",
+            "and give the supporting action. Award 3 Evidence for explicit qualifying About/Headline work, "
+            "with zero dated points from that source alone. LC-2 and LC-3 can qualify on explicit paid work "
+            "without a named platform. Keep google and meta null when only skills are listed. The application "
+            "scores skills-only LC-1 credit separately.",
+            "For LC-1 through LC-3 Duration, use the full eligible job period when an experience description "
+            "shows qualifying work, even if it shows only one campaign. Use a shorter period when explicitly "
+            "stated. Apply the rubric's employment eligibility and overlap rules. This assumption applies "
+            "only to the Duration component.",
             "For budgets return each qualifying personally managed amount, in rupees as a decimal string "
             "using a stated INR equivalent if applicable, and the original recurring period. "
             "Use the lower bound of ranges, include explicitly supported zero, and give the source. "
@@ -847,7 +854,7 @@ ROLE_PROFILES = {
             "reported numeric value, action, improvement, baseline and second metric when available. "
             "Use null for unavailable details.",
             "In periods list all identifiable dated hands-on work across LC-1 to LC-3 for the Review check, "
-            "including qualifying lower tiers. Reference supplied experience indices. "
+            "including qualifying lower tiers. These Review periods are separate from Duration scoring. Reference supplied experience indices. "
             "Use role_span only for explicitly ongoing work and leave its date fields null. "
             "Use stated_period with the dates/duration actually given for time-bounded work. "
             "Never substitute the full role span for a one-off result.",
@@ -868,7 +875,7 @@ ROLE_PROFILES = {
         )},
         strongest_evidence_columns=["Strongest Evidence"],
         rationale_max_words=50,
-        evidence_sources=["Headline", "About", "All experiences"],
+        evidence_sources=["Headline", "About", "All experiences", "Skills"],
         skip_if_no_evidence=False,
         experience_fields=[
             "index", "company_name", "position_or_title", "description", "employment_type",

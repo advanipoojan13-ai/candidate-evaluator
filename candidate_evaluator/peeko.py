@@ -210,14 +210,30 @@ def _merged_months(intervals):
     return total
 
 
+def _skills_only_acquisition(candidate):
+    skills = list(candidate.get("skills") or [])
+    for experience in candidate.get("experiences") or []:
+        skills.extend(experience.get("experience_skills") or [])
+    names = {" ".join(skill.casefold().split()) for skill in skills}
+    google = any(re.fullmatch(
+        r"google (?:ads(?: app campaigns?)?|adwords|advertising|app campaigns?|uac)"
+        r"|adwords|universal app campaigns?|uac", name
+    ) for name in names)
+    meta = any(re.fullmatch(
+        r"(?:meta|facebook|fb|instagram) (?:ads(?: manager)?|advertising)", name
+    ) for name in names)
+    return (0, 3, 10)[int(google) + int(meta)]
+
+
 def calculate_grading(grading, candidate, evaluation_date):
     _check_schema(grading, grading_schema())
     platform_points = [_components(grading[key]) for key in ("google", "meta") if grading[key] is not None]
-    acquisition = 0
     if len(platform_points) == 2:
         acquisition = sum(map(min, zip(*platform_points))) * 10
     elif platform_points:
         acquisition = sum(platform_points[0]) * 3
+    else:
+        acquisition = _skills_only_acquisition(candidate)
 
     ownership = _tier_score(grading["ownership"], OWNERSHIP_TIERS)
     conversion = _tier_score(grading["conversion"], CONVERSION_TIERS)
@@ -262,6 +278,8 @@ def calculate_grading(grading, candidate, evaluation_date):
         funnel["score"] == 0, metrics["score"] == 0,
     )
     missing = grading["Missing or Unclear Information"].strip()
+    if not platform_points and acquisition:
+        missing = f"LC-1 skills-only credit. Hands-on Google and Meta work unverified. {missing}".strip()
     if len(platform_points) == 1:
         platform = "Google" if grading["google"] is None else "Meta"
         missing = f"{platform} hands-on work unverified. {missing}".strip()

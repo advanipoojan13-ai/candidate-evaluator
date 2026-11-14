@@ -5,6 +5,7 @@ import os
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -418,7 +419,17 @@ def completed_preview_rows(run_id: str, role_key: Optional[str] = None) -> list[
 def role_for_run(run_id: str, override_role_key: Optional[str] = None) -> RoleProfile:
     status = load_status(run_id)
     role_key = override_role_key or status.get("role", DEFAULT_ROLE_KEY)
-    return get_role_profile(role_key, status.get("custom_role_config"))
+    role = get_role_profile(role_key, status.get("custom_role_config"))
+    if role_key == "peeko":
+        rubric_path = run_dir(run_id) / "rubric.md"
+        if rubric_path.is_file():
+            from . import peeko
+            from .rubric_contract import rubric_input_issue
+
+            if rubric_input_issue(rubric_path.read_text(encoding="utf-8"), role):
+                return replace(role, export_columns=peeko.LEGACY_OUTPUT_COLUMNS,
+                               total_column="Final Score (/40)", total_max=40)
+    return role
 
 
 def progress_counts(run_id: str) -> dict[str, Any]:
@@ -462,7 +473,7 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.output_columns)
     csv_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.csv"
     xlsx_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
-    frame.to_csv(csv_path, index=False)
+    frame.to_csv(csv_path, index=False, float_format="%.2f" if role.key == "peeko" else None)
     if role.key == "peeko":
         from .peeko import write_excel
 

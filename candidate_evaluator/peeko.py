@@ -1,42 +1,56 @@
 """Peeko's structured evidence contract and deterministic scoring."""
 import re
-from decimal import Decimal, localcontext
 
 from .dates import _calculate_dates, _parse_date
 
 SCORE_COLUMNS = (
-    "Acquisition Campaign Management Score (/10)",
-    "Campaign Ownership, Creation and Optimisation Score (/10)",
+    "Acquisition Campaign Management Score (/15)",
+    "Campaign Ownership, Creation and Optimisation Score (/5)",
     "App and Website Conversion Outcomes Score (/10)",
-    "Scaling — Annual Budget Managed Score (/10)",
     "Funnel Optimisation & Conversion Improvement Score (/3)",
-    "Campaign Metrics Improved Score (/10)",
+    "Paid Campaign Metrics Score (/10)",
 )
-TOTAL_COLUMN = "Final Score (/40)"
+TOTAL_COLUMN = "Final Score (/43)"
 CUTOFF_COLUMN = "Cutoff Met (Yes/No)"
 REVIEW_COLUMN = "Review (Yes/No)"
 UNVERIFIED_COLUMNS = (
     "Acquisition Campaign Management Unverified",
     "Campaign Ownership, Creation and Optimisation Unverified",
     "App and Website Conversion Outcomes Unverified",
-    "Annual Budget Unverified",
     "Funnel Optimisation Unverified",
-    "Campaign Metrics Improved Unverified",
+    "Paid Campaign Metrics Unverified",
 )
 WARNING_COLUMNS = (*UNVERIFIED_COLUMNS, "Date-Quality Warning")
 NARRATIVE_COLUMNS = ("Strongest Evidence", "Missing or Unclear Information", "Score Rationale")
 OUTPUT_COLUMNS = [
     "Rank Number", "Candidate", "Profile URL", "Current Company", "Current Title",
-    *SCORE_COLUMNS[:4], TOTAL_COLUMN, *SCORE_COLUMNS[4:], CUTOFF_COLUMN, REVIEW_COLUMN,
+    *SCORE_COLUMNS, TOTAL_COLUMN, CUTOFF_COLUMN, REVIEW_COLUMN,
     *WARNING_COLUMNS, *NARRATIVE_COLUMNS,
 ]
-# Use integer tenths until the score and cutoff are settled.
-OWNERSHIP_TIERS = {"end_to_end": 10, "creation": 7, "optimisation": 3, "none": 0}
+# Preserve the column names and historical scores of completed /40 runs.
+LEGACY_OUTPUT_COLUMNS = [
+    *OUTPUT_COLUMNS[:5],
+    "Acquisition Campaign Management Score (/10)",
+    "Campaign Ownership, Creation and Optimisation Score (/10)",
+    SCORE_COLUMNS[2],
+    "Scaling — Annual Budget Managed Score (/10)",
+    "Final Score (/40)",
+    SCORE_COLUMNS[3],
+    "Campaign Metrics Improved Score (/10)",
+    CUTOFF_COLUMN, REVIEW_COLUMN,
+    *UNVERIFIED_COLUMNS[:3], "Annual Budget Unverified", UNVERIFIED_COLUMNS[3],
+    "Campaign Metrics Improved Unverified", "Date-Quality Warning", *NARRATIVE_COLUMNS,
+]
+# Use integer hundredths until the score and cutoff are settled.
+MAX_SCORE = 43
+CUTOFF_HUNDREDTHS = 2903
+OWNERSHIP_TIERS = {"end_to_end": 50, "creation": 35, "optimisation": 15, "none": 0}
 CONVERSION_TIERS = {
-    "app_conversions": 10, "website_conversions": 7, "app_campaign": 5,
-    "website_campaign": 3, "none": 0,
+    "app_conversions": 100, "website_conversions": 70, "app_campaign": 50,
+    "website_campaign": 30, "none": 0,
 }
-BUDGET_PERIODS = {"annual": 1, "monthly": 12, "quarterly": 4}
+FUNNEL_TIERS = {"measured_improvement": 30, "change_implemented": 20, "funnel_analysis": 10, "none": 0}
+METRIC_TIERS = {"quantified_improvement": 100, "hands_on": 60, "keyword_only": 30, "none": 0}
 
 
 def _object(**properties):
@@ -75,12 +89,10 @@ def grading_schema():
             tier=_one_of(CONVERSION_TIERS), components=_nullable(components),
             destination_unverified={"type": "boolean"},
         ),
-        budgets=_array(_object(amount_inr=string, period=_one_of(BUDGET_PERIODS), source=string)),
-        funnel=_object(score=_one_of(range(4), "integer"), source=optional_string),
+        funnel=_object(tier=_one_of(FUNNEL_TIERS), components=_nullable(components)),
         metrics=_object(
-            score=_one_of((0, 1, 3, 6, 10), "integer"), source=optional_string,
-            metric=optional_string, numeric_value=optional_string, action=optional_string,
-            improvement=optional_string, baseline=optional_string, second_metric=optional_string,
+            tier=_one_of(METRIC_TIERS), components=_nullable(components),
+            metric=optional_string, action=optional_string, improvement=optional_string,
         ),
         periods=_array(_object(
             experience_index={"type": "integer", "minimum": 0},
@@ -119,41 +131,22 @@ def _check_schema(value, schema, path="Peeko grading"):
             _check_schema(item, schema["items"], f"{path}[{index}]")
 
 
-def _components(entry):
+def _components(entry, minimum_evidence=3):
     if not all(source.strip() for source in entry["sources"]) or not entry["sources"]:
         raise ValueError("Peeko requires a source for awarded component points.")
+    if entry["evidence"] < minimum_evidence:
+        raise ValueError("Peeko hands-on evidence requires a qualifying description or About/Headline statement.")
     if entry["evidence"] < 4 and (entry["recency"] or entry["duration"]):
         raise ValueError("Dated points require a qualifying experience description.")
     return [entry["evidence"], entry["recency"], entry["duration"]]
 
 
-def _tier_score(entry, tiers):
+def _tier_score(entry, tiers, minimum_evidence=3):
     multiplier = tiers[entry["tier"]]
     components = entry["components"]
     if bool(multiplier) != (components is not None):
         raise ValueError("Peeko tier and component evidence must agree.")
-    return sum(_components(components)) * multiplier if multiplier else 0
-
-
-def _budget(budgets):
-    supported = []
-    for budget in budgets:
-        amount_text = budget["amount_inr"]
-        if not re.fullmatch(r"[0-9]+(?:[.][0-9]+)?", amount_text):
-            raise ValueError("Peeko budget must be a non-negative decimal INR amount.")
-        if not budget["source"].strip():
-            raise ValueError("Peeko requires a source for each budget.")
-        with localcontext() as context:
-            context.prec = len(amount_text) + 2
-            annual = Decimal(amount_text) * BUDGET_PERIODS[budget["period"]]
-        supported.append((annual, budget))
-    if not supported:
-        return 0, None, None
-    annual, source = max(supported, key=lambda item: item[0])
-    points = next((points for minimum, points in (
-        (30_000_000, 10), (10_000_000, 6), (5_000_000, 3),
-    ) if annual >= minimum), int(annual > 0))
-    return points, format(annual, "f"), source
+    return sum(_components(components, minimum_evidence)) * multiplier if multiplier else 0
 
 
 def _date(value):
@@ -222,16 +215,16 @@ def _skills_only_acquisition(candidate):
     meta = any(re.fullmatch(
         r"(?:meta|facebook|fb|instagram) (?:ads(?: manager)?|advertising)", name
     ) for name in names)
-    return (0, 3, 10)[int(google) + int(meta)]
+    return (0, 30, 100)[int(google) + int(meta)]
 
 
 def calculate_grading(grading, candidate, evaluation_date):
     _check_schema(grading, grading_schema())
     platform_points = [_components(grading[key]) for key in ("google", "meta") if grading[key] is not None]
     if len(platform_points) == 2:
-        acquisition = sum(map(min, zip(*platform_points))) * 10
+        acquisition = sum(map(min, zip(*platform_points))) * 150
     elif platform_points:
-        acquisition = sum(platform_points[0]) * 3
+        acquisition = sum(platform_points[0]) * 60
     else:
         acquisition = _skills_only_acquisition(candidate)
 
@@ -239,16 +232,19 @@ def calculate_grading(grading, candidate, evaluation_date):
     conversion = _tier_score(grading["conversion"], CONVERSION_TIERS)
     if grading["conversion"]["destination_unverified"] and grading["conversion"]["tier"] != "website_campaign":
         raise ValueError("Peeko unspecified destination must use the website campaign-work tier.")
-    budget_points, annual_budget, budget_source = _budget(grading["budgets"])
-    funnel, metrics = grading["funnel"], grading["metrics"]
-    if funnel["score"] and not (funnel["source"] or "").strip():
-        raise ValueError("Peeko funnel points require a source.")
-    if metrics["score"] and not all((metrics[key] or "").strip() for key in ("source", "metric")):
-        raise ValueError("Peeko metric points require a named metric and source.")
-    if metrics["score"] >= 6 and not all((metrics[key] or "").strip() for key in ("action", "improvement")):
-        raise ValueError("Peeko quantified improvement points require action and improvement.")
-    if metrics["score"] == 10 and not any((metrics[key] or "").strip() for key in ("baseline", "second_metric")):
-        raise ValueError("Peeko top metric points require a baseline or a second metric.")
+    funnel = _tier_score(grading["funnel"], FUNNEL_TIERS)
+    metric_entry = grading["metrics"]
+    keyword_only = metric_entry["tier"] == "keyword_only"
+    metrics = _tier_score(metric_entry, METRIC_TIERS, minimum_evidence=1 if keyword_only else 3)
+    if metrics and not (metric_entry["metric"] or "").strip():
+        raise ValueError("Peeko metric points require a named metric.")
+    if keyword_only and _components(metric_entry["components"], minimum_evidence=1) != [1, 0, 0]:
+        raise ValueError("Peeko keyword-only metrics require exactly one evidence point and zero dated points.")
+    if metric_entry["tier"] == "quantified_improvement" and (
+        not (metric_entry["action"] or "").strip()
+        or not re.search(r"\d", metric_entry["improvement"] or "")
+    ):
+        raise ValueError("Peeko quantified improvement requires a candidate action and a measured change.")
 
     from .extractor import merge_duplicate_experiences
 
@@ -272,11 +268,9 @@ def calculate_grading(grading, candidate, evaluation_date):
         len(platform_points) == 1 or hands_on_months < 24
         or (grading["unrelated_work"] and not all((acquisition, ownership, conversion)))
     )
-    total_tenths = acquisition + ownership + conversion + budget_points * 10
-    unverified = (
-        not platform_points, not ownership, not conversion, annual_budget is None,
-        funnel["score"] == 0, metrics["score"] == 0,
-    )
+    scores = (acquisition, ownership, conversion, funnel, metrics)
+    total_hundredths = sum(scores)
+    unverified = (not platform_points, not ownership, not conversion, not funnel, not metrics)
     missing = grading["Missing or Unclear Information"].strip()
     if not platform_points and acquisition:
         missing = f"LC-1 skills-only credit. Hands-on Google and Meta work unverified. {missing}".strip()
@@ -293,20 +287,16 @@ def calculate_grading(grading, candidate, evaluation_date):
         "Profile URL": candidate.get("linkedin_url", ""),
         "Current Company": current.get("company_name", ""),
         "Current Title": current.get("position_or_title", ""),
-        **dict(zip(SCORE_COLUMNS, (
-            acquisition / 10, ownership / 10, conversion / 10, float(budget_points),
-            float(funnel["score"]), float(metrics["score"]),
-        ))),
-        TOTAL_COLUMN: total_tenths / 10,
-        CUTOFF_COLUMN: _yes_no(total_tenths >= 270),
+        **dict(zip(SCORE_COLUMNS, (points / 100 for points in scores))),
+        TOTAL_COLUMN: total_hundredths / 100,
+        CUTOFF_COLUMN: _yes_no(total_hundredths >= CUTOFF_HUNDREDTHS),
         REVIEW_COLUMN: _yes_no(review),
         **dict(zip(UNVERIFIED_COLUMNS, map(_yes_no, unverified))),
         "Date-Quality Warning": _yes_no(date_warning),
         **{column: grading[column] for column in NARRATIVE_COLUMNS},
         "Missing or Unclear Information": missing,
         "Peeko Audit": {
-            "grading": grading, "annual_budget_inr": annual_budget,
-            "budget_source": budget_source, "hands_on_months": hands_on_months,
+            "grading": grading, "hands_on_months": hands_on_months,
             "evaluation_date": evaluation_date.isoformat(),
         },
     }
@@ -317,13 +307,15 @@ def _yes_no(condition):
 
 
 def write_excel(frame, destination):
-    """Preserve numeric cells and display Peeko scores to one decimal."""
+    """Preserve numeric cells and display Peeko scores to two decimal places."""
     from pandas import ExcelWriter
 
+    legacy = list(frame.columns) == LEGACY_OUTPUT_COLUMNS
+    score_columns = LEGACY_OUTPUT_COLUMNS[5:12] if legacy else (*SCORE_COLUMNS, TOTAL_COLUMN)
     with ExcelWriter(destination, engine="openpyxl") as writer:
         frame.to_excel(writer, index=False)
         worksheet = writer.sheets["Sheet1"]
         for index, name in enumerate(frame.columns, start=1):
-            if name in (*SCORE_COLUMNS, TOTAL_COLUMN):
+            if name in score_columns:
                 for row in range(2, worksheet.max_row + 1):
-                    worksheet.cell(row=row, column=index).number_format = "0.0"
+                    worksheet.cell(row=row, column=index).number_format = "0.0" if legacy else "0.00"

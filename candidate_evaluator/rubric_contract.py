@@ -11,8 +11,10 @@ def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
     if role.key == "fe_orange":
         return _fe_orange_rubric_issue(rubric_text)
     if role.key == "peeko":
-        if not all(re.search(rf"\bLC[-\s]+{number}\b", rubric_text, re.IGNORECASE) for number in range(1, 7)):
-            return "Upload the Peeko LinkedIn rubric with criteria LC-1 through LC-6."
+        if not all(re.search(rf"\bLC[-\s]+{number}\b", rubric_text, re.IGNORECASE) for number in range(1, 6)) or re.search(
+            r"\bLC[-\s]+6\b", rubric_text, re.IGNORECASE
+        ):
+            return "Upload the Peeko LinkedIn rubric with updated criteria LC-1 through LC-5."
         return ""
     if role.key != "sde3":
         return ""

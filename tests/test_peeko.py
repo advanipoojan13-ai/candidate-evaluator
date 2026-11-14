@@ -12,7 +12,7 @@ from app import _evaluate_candidate_batch_for_run, _rows_to_csv_bytes, _rows_to_
 from candidate_evaluator.extractor import normalize_candidate
 from candidate_evaluator.openai_scoring import _candidate_payload, _response_schema
 from candidate_evaluator.peeko import (
-    CUTOFF_COLUMN, OUTPUT_COLUMNS, REVIEW_COLUMN, SCORE_COLUMNS, TOTAL_COLUMN, UNVERIFIED_COLUMNS,
+    CUTOFF_COLUMN, LEGACY_OUTPUT_COLUMNS, OUTPUT_COLUMNS, REVIEW_COLUMN, SCORE_COLUMNS, TOTAL_COLUMN, UNVERIFIED_COLUMNS,
     calculate_grading,
 )
 from candidate_evaluator.progress import init_run, role_for_run, save_exports
@@ -21,15 +21,11 @@ from candidate_evaluator.rubric_contract import rubric_input_issue
 from candidate_evaluator.validation import validate_output_row
 
 TODAY = date(2026, 11, 14)
-RUBRIC = "\n".join(f"### LC-{i}" for i in range(1, 7))
+RUBRIC = "\n".join(f"### LC-{i}" for i in range(1, 6))
 
 
 def components(evidence=4, recency=3, duration=3):
     return {"evidence": evidence, "recency": recency, "duration": duration, "sources": ["0: acquired users"]}
-
-
-def budget(amount, period="annual"):
-    return {"amount_inr": str(amount), "period": period, "source": "0: personally allocated spend"}
 
 
 def span(index=0, **kwargs):
@@ -59,10 +55,10 @@ def grading():
         "google": None, "meta": None,
         "ownership": {"tier": "none", "components": None},
         "conversion": {"tier": "none", "components": None, "destination_unverified": False},
-        "budgets": [], "funnel": {"score": 0, "source": None},
+        "funnel": {"tier": "none", "components": None},
         "metrics": {
-            "score": 0, "source": None, "metric": None, "numeric_value": None,
-            "action": None, "improvement": None, "baseline": None, "second_metric": None,
+            "tier": "none", "components": None,
+            "metric": None, "action": None, "improvement": None,
         },
         "periods": [], "unrelated_work": False, "date_quality_warning": False,
         "Strongest Evidence": "", "Missing or Unclear Information": "", "Score Rationale": "",
@@ -76,7 +72,7 @@ def score(grading, *experiences):
 
 
 def test_role_dropdown_schema_and_rubric_without_calculation_sections():
-    app = AppTest.from_string("from app import _role_selector\nimport streamlit as st\nst.write(_role_selector())").run()
+    app = AppTest.from_string("from app import _role_selector\nimport streamlit as st\nst.write(_role_selector())", default_timeout=15).run()
     app.selectbox[0].select("Peeko").run()
     assert app.markdown[0].value == "peeko"
     role = get_role_profile("peeko")
@@ -136,7 +132,7 @@ def test_current_employment_export(grading, source_field, dates, expected):
     ([], ["Facebook Ads", "Instagram Ads"], False, 0.3),
     (["  Google   AdWords "], ["Meta Ads Manager"], False, 1.0),
     (["Google Ads"], ["Google App Campaigns"], False, 0.3),
-    ([], ["Meta Ads"], True, 1.2),
+    ([], ["Meta Ads"], True, 2.4),
 ])
 def test_skills_only_fallback(grading, global_skills, attached_skills, hands_on, expected):
     profile = normalize_candidate({
@@ -160,14 +156,14 @@ def test_one_off_duration_scoring_does_not_extend_review_period(grading):
     job = experience(description="Launched a Google and Meta campaign for Diwali.")
     grading["google"] = grading["meta"] = components(4, 0, 2)
     row = score(grading, job)
-    assert row[SCORE_COLUMNS[0]] == 6
+    assert row[SCORE_COLUMNS[0]] == 9
     assert row["Peeko Audit"]["hands_on_months"] == 0
     assert row[REVIEW_COLUMN] == "Yes"
 
 
 @pytest.mark.parametrize(("google", "meta", "expected"), [
-    (None, None, 0), ((4, 3, 3), None, 3), (None, (4, 2, 1), 2.1),
-    ((4, 3, 0), (4, 0, 3), 4), ((4, 3, 3), (3, 0, 0), 3), ((4, 3, 3), (4, 3, 3), 10),
+    (None, None, 0), ((4, 3, 3), None, 6), (None, (4, 2, 1), 4.2),
+    ((4, 3, 0), (4, 0, 3), 6), ((4, 3, 3), (3, 0, 0), 4.5), ((4, 3, 3), (4, 3, 3), 15),
 ])
 def test_platform_handling(grading, google, meta, expected):
     grading["google"] = components(*google) if google else None
@@ -180,7 +176,7 @@ def test_platform_handling(grading, google, meta, expected):
 
 
 @pytest.mark.parametrize(("field", "tier", "expected"), [
-    ("ownership", "end_to_end", 10), ("ownership", "creation", 7), ("ownership", "optimisation", 3),
+    ("ownership", "end_to_end", 5), ("ownership", "creation", 3.5), ("ownership", "optimisation", 1.5),
     ("conversion", "app_conversions", 10), ("conversion", "website_conversions", 7),
     ("conversion", "app_campaign", 5), ("conversion", "website_campaign", 3),
 ])
@@ -194,47 +190,33 @@ def test_tier_weights(grading, field, tier, expected):
         assert "Campaign destination unverified" in row["Missing or Unclear Information"]
 
 
-@pytest.mark.parametrize(("amount", "period", "expected"), [
-    (0, "annual", 0), ("0.01", "annual", 1), ("4999999.99", "annual", 1), (5000000, "annual", 3),
-    ("9999999.99", "annual", 3), (10000000, "annual", 6), ("29999999.99", "annual", 6),
-    (30000000, "annual", 10), (2500000, "monthly", 10), (1250000, "quarterly", 3),
-    ("416666.6666666666666666666666", "monthly", 1),
+@pytest.mark.parametrize(("field", "tier", "points", "expected"), [
+    ("funnel", "measured_improvement", (4, 3, 3), 3),
+    ("funnel", "change_implemented", (4, 2, 1), 1.4),
+    ("funnel", "funnel_analysis", (3, 0, 0), 0.3),
+    ("metrics", "quantified_improvement", (4, 3, 3), 10),
+    ("metrics", "hands_on", (4, 2, 1), 4.2),
+    ("metrics", "keyword_only", (1, 0, 0), 0.3),
 ])
-def test_budget_boundaries(grading, amount, period, expected):
-    grading["budgets"] = [budget(amount, period)]
+def test_funnel_and_metric_components_contribute_to_total(grading, field, tier, points, expected):
+    grading[field].update(tier=tier, components=components(*points))
+    if field == "metrics":
+        grading[field].update(metric="CAC", action="Adjusted bids", improvement="20% lower")
     row = score(grading)
-    assert row[SCORE_COLUMNS[3]] == expected
-    assert row[UNVERIFIED_COLUMNS[3]] == "No"
-    assert row["Peeko Audit"]["budget_source"]["period"] == period
+    assert row[SCORE_COLUMNS[3 if field == "funnel" else 4]] == expected
+    assert row[TOTAL_COLUMN] == expected
 
 
-def test_budget_uses_largest_annualised_record_without_summing(grading):
-    grading["budgets"] = [budget(4_500_000), budget(400_000, "monthly")]
-    row = score(grading)
-    assert row[SCORE_COLUMNS[3]] == 1
-    assert row["Peeko Audit"]["annual_budget_inr"] == "4800000"
-
-
-def test_cutoff_and_review_are_independent_of_recruiter_scores(grading):
+def test_all_five_criteria_compute_maximum(grading):
     grading.update(google=components(), meta=components())
-    grading["ownership"].update(tier="creation", components=components())
-    grading["conversion"].update(tier="website_conversions", components=components())
-    grading["budgets"] = [budget(5_000_000)]
-    grading["funnel"] = {"score": 3, "source": "0: app funnel experiment"}
-    grading["metrics"].update(score=10, source="0: campaign result", metric="CAC", numeric_value="₹80",
-                              action="Adjusted bids", improvement="20% lower", baseline="₹100")
+    grading["ownership"].update(tier="end_to_end", components=components())
+    grading["conversion"].update(tier="app_conversions", components=components())
+    grading["funnel"].update(tier="measured_improvement", components=components())
+    grading["metrics"].update(tier="quantified_improvement", components=components(),
+                              metric="CAC", action="Adjusted bids", improvement="20% lower")
     row = score(grading)
-    assert row[TOTAL_COLUMN] == 27
+    assert row[TOTAL_COLUMN] == 43
     assert (row[CUTOFF_COLUMN], row[REVIEW_COLUMN]) == ("Yes", "Yes")
-    assert [row[key] for key in SCORE_COLUMNS[-2:]] == [3, 10]
-    grading["meta"]["duration"] = 2
-    row = score(grading)
-    assert row[TOTAL_COLUMN] == 26 and row[CUTOFF_COLUMN] == "No"
-    grading["ownership"].update(tier="end_to_end")
-    grading["meta"]["duration"] = 3
-    grading["conversion"].update(tier="app_conversions")
-    grading["budgets"] = [budget(30_000_000)]
-    assert score(grading)[TOTAL_COLUMN] == 40
 
 
 @pytest.mark.parametrize(("jobs", "periods", "months", "warning"), [
@@ -275,8 +257,8 @@ def test_unrelated_work_and_one_platform_independently_trigger_review(grading):
 
 @pytest.mark.parametrize("case", [
     "missing", "boolean", "fraction", "invalid_tier", "tier_without_components", "dated_title",
-    "empty_source", "negative_budget", "nonfinite_budget", "invalid_review_index",
-    "funnel_without_source", "bad_metric_score", "missing_metric_baseline",
+    "empty_source", "legacy_budget", "dated_metric_keyword", "invalid_review_index",
+    "funnel_without_source", "bad_metric_tier", "missing_metric_change",
 ])
 def test_malformed_provider_fields_are_rejected(grading, case):
     if case == "missing":
@@ -290,16 +272,19 @@ def test_malformed_provider_fields_are_rejected(grading, case):
         grading["google"][field] = value
     elif case in {"invalid_tier", "tier_without_components"}:
         grading["ownership"]["tier"] = "other" if case == "invalid_tier" else "creation"
-    elif case in {"negative_budget", "nonfinite_budget"}:
-        grading["budgets"] = [budget(-1 if case == "negative_budget" else "NaN")]
+    elif case == "legacy_budget":
+        grading["budgets"] = []
+    elif case == "dated_metric_keyword":
+        grading["metrics"].update(tier="keyword_only", metric="CAC", components=components(1, 1, 0))
     elif case == "invalid_review_index":
         grading["periods"] = [span(999)]
     elif case == "funnel_without_source":
-        grading["funnel"]["score"] = 2
-    elif case == "bad_metric_score":
-        grading["metrics"]["score"] = 7
+        grading["funnel"].update(tier="change_implemented", components={**components(), "sources": []})
+    elif case == "bad_metric_tier":
+        grading["metrics"]["tier"] = "other"
     else:
-        grading["metrics"].update(score=10, source="Example", metric="CAC", action="Targeted", improvement="20%")
+        grading["metrics"].update(tier="quantified_improvement", components=components(),
+                                  metric="CAC", action="Adjusted bids", improvement="lower")
     with pytest.raises(ValueError):
         calculate_grading(grading, candidate(experience()), TODAY)
 
@@ -316,14 +301,14 @@ def test_shared_ranks_export_order_and_numeric_excel_cells(grading, tmp_path, mo
     assert [(row["Candidate"], row["Rank Number"]) for row in prepared] == [("A", 1), ("B", 1), ("C", 3)]
     assert list(prepared[0]) == OUTPUT_COLUMNS
     assert "Peeko Audit" not in prepared[0]
-    assert "27.0" in _rows_to_csv_bytes(prepared, OUTPUT_COLUMNS).decode()
+    assert "27.00" in _rows_to_csv_bytes(prepared, OUTPUT_COLUMNS).decode()
 
     init_run("peeko-run", [candidate()], RUBRIC, "test-model", role_key="peeko")
     assert role_for_run("peeko-run").key == "peeko"
     _, saved_xlsx = save_exports("peeko-run", rows)
     for workbook in (saved_xlsx, BytesIO(_rows_to_xlsx_bytes(prepared, OUTPUT_COLUMNS))):
-        cell = load_workbook(workbook).active["J2"]
-        assert cell.value == 27 and cell.data_type == "n" and cell.number_format == "0.0"
+        cell = load_workbook(workbook).active["K2"]
+        assert cell.value == 27 and cell.data_type == "n" and cell.number_format == "0.00"
 
 
 @pytest.mark.parametrize("provider", ["openai", "deepseek"])
@@ -352,20 +337,22 @@ def test_mocked_provider_batch_preserves_raw_audit_and_isolates_bad_candidate(gr
         "key", "model", RUBRIC, [candidate(), second], get_role_profile("peeko"), provider_key=provider,
     )
     valid, failed = outcome["results"]
-    assert valid["state"] == "completed" and valid["row"][TOTAL_COLUMN] == 3
+    assert valid["state"] == "completed" and valid["row"][TOTAL_COLUMN] == 6
     assert valid["row"]["Peeko Audit"]["grading"]["google"]["evidence"] == 4
     assert valid["raw"]["grading"]["google"]["evidence"] == 4
     assert failed["state"] == "failed"
 
 
-def test_cutoff_uses_exact_tenths(grading):
-    grading["google"] = components()
-    grading["ownership"].update(tier="creation", components=components(4, 3, 0))
-    grading["conversion"].update(tier="app_conversions", components=components(4, 3, 2))
-    grading["budgets"] = [budget(30_000_000)]
+@pytest.mark.parametrize(("duration", "total", "cutoff"), [(1, 28.7, "No"), (2, 29.05, "Yes")])
+def test_cutoff_uses_exact_hundredths(grading, duration, total, cutoff):
+    grading.update(google=components(), meta=components())
+    grading["ownership"].update(tier="creation", components=components(4, 3, duration))
+    grading["conversion"].update(tier="app_conversions", components=components())
+    grading["funnel"].update(tier="change_implemented", components=components(3, 0, 0))
+    grading["metrics"].update(tier="keyword_only", components=components(1, 0, 0), metric="CAC")
     row = score(grading)
-    assert row[TOTAL_COLUMN] == 26.9
-    assert row[CUTOFF_COLUMN] == "No"
+    assert row[TOTAL_COLUMN] == total
+    assert row[CUTOFF_COLUMN] == cutoff
 
 
 def test_uploaded_json_and_rubric_use_peeko_importer():
@@ -394,3 +381,22 @@ def test_completed_run_persists_component_audit_and_keeps_exact_export_columns(g
     [restored] = result_rows("audit")
     assert restored["Peeko Audit"]["grading"]["google"] == grading["google"]
     assert list(prepare_output_rows([restored], role_for_run("audit"))[0]) == OUTPUT_COLUMNS
+
+
+
+def test_saved_legacy_peeko_results_keep_original_export_schema(tmp_path, monkeypatch):
+    from candidate_evaluator.progress import mark_completed, result_rows
+
+    monkeypatch.chdir(tmp_path)
+    legacy_rubric = RUBRIC + "\n### LC-6"
+    init_run("legacy", [candidate()], legacy_rubric, "test-model", role_key="peeko")
+    role = role_for_run("legacy")
+    assert rubric_input_issue(legacy_rubric, role)
+    row = dict.fromkeys(LEGACY_OUTPUT_COLUMNS, "")
+    row.update({"Candidate": "Test Candidate", "Final Score (/40)": 27.0,
+                "Scaling — Annual Budget Managed Score (/10)": 6.0})
+    mark_completed("legacy", "example", row, {})
+    [restored] = prepare_output_rows(result_rows("legacy"), role)
+    assert list(restored) == LEGACY_OUTPUT_COLUMNS
+    assert restored["Final Score (/40)"] == 27.0
+    assert restored["Scaling — Annual Budget Managed Score (/10)"] == 6.0

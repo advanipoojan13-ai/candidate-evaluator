@@ -824,35 +824,33 @@ ROLE_PROFILES = {
         label="Peeko",
         role_name="Performance Marketer (User Acquisition)",
         grading_columns=[*peeko.OUTPUT_COLUMNS, "Peeko Audit"],
-        category_scores=OrderedDict.fromkeys(peeko.SCORE_COLUMNS[:4], 10),
+        category_scores=OrderedDict(zip(peeko.SCORE_COLUMNS, (15, 5, 10, 3, 10))),
         allowed_scores={},
         total_column=peeko.TOTAL_COLUMN,
-        total_max=40,
+        total_max=peeko.MAX_SCORE,
         outcome_column="Rank Number",
         outcome_bands=[],
         evidence_confidence_values=[],
         system_prompt="You evaluate LinkedIn evidence for the Peeko Performance Marketer role.",
         instructions=[
             "Return evidence decisions and component points only. The application computes weights, "
-            "annual budget points, totals, cutoff, warnings, review routing and rank.",
+            "totals, cutoff, warnings, review routing and rank.",
             "Return google and meta independently as null or as supported components. "
-            "For ownership and conversion select the highest supported tier; use null components for none.",
+            "For ownership, conversion, funnel and metrics select the highest supported tier; use null components for none.",
             "For each component set, sources must identify the source experience index or About/Headline "
             "and give the supporting action. Award 3 Evidence for explicit qualifying About/Headline work, "
             "with zero dated points from that source alone. LC-2 and LC-3 can qualify on explicit paid work "
             "without a named platform. Keep google and meta null when only skills are listed. The application "
             "scores skills-only LC-1 credit separately.",
-            "For LC-1 through LC-3 Duration, use the full eligible job period when an experience description "
+            "For LC-1 through LC-5 Duration, use the full eligible job period when an experience description "
             "shows qualifying work, even if it shows only one campaign. Use a shorter period when explicitly "
             "stated. Apply the rubric's employment eligibility and overlap rules. This assumption applies "
             "only to the Duration component.",
-            "For budgets return each qualifying personally managed amount, in rupees as a decimal string "
-            "using a stated INR equivalent if applicable, and the original recurring period. "
-            "Use the lower bound of ranges, include explicitly supported zero, and give the source. "
-            "Do not annualise amounts, infer currency, sum budgets, or treat isolated spend as recurring.",
-            "For funnel and metrics return the rubric score and supporting source. Include named metric, "
-            "reported numeric value, action, improvement, baseline and second metric when available. "
-            "Use null for unavailable details.",
+            "Score components using work that supports the selected tier. For LC-4 and hands-on LC-5, "
+            "award 4 Evidence from qualifying Experience descriptions or 3 from About/Headline. "
+            "For LC-5 keyword_only, cite the keyword and its source (including Skills when applicable), "
+            "return Evidence 1 and Recency and Duration 0. For quantified_improvement give the candidate "
+            "action and quantified change. Use null for unavailable metric details.",
             "In periods list all identifiable dated hands-on work across LC-1 to LC-3 for the Review check, "
             "including qualifying lower tiers. These Review periods are separate from Duration scoring. Reference supplied experience indices. "
             "Use role_span only for explicitly ongoing work and leave its date fields null. "

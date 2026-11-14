@@ -1091,6 +1091,13 @@ def _rows_to_csv_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
+    from candidate_evaluator import peeko
+    if columns == peeko.OUTPUT_COLUMNS:
+        score_columns = (*peeko.SCORE_COLUMNS, peeko.TOTAL_COLUMN)
+        rows = [
+            {**row, **{column: f"{row[column]:.2f}" for column in score_columns}}
+            for row in rows
+        ]
     writer.writerows(rows)
     return buffer.getvalue().encode("utf-8")
 
@@ -1104,7 +1111,7 @@ def _rows_to_xlsx_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes
     frame = pd.DataFrame(rows, columns=columns)
     from candidate_evaluator import peeko
 
-    if columns == peeko.OUTPUT_COLUMNS:
+    if columns in (peeko.OUTPUT_COLUMNS, peeko.LEGACY_OUTPUT_COLUMNS):
         peeko.write_excel(frame, buffer)
     else:
         frame.to_excel(buffer, index=False, engine="openpyxl")

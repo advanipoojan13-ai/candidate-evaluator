@@ -98,7 +98,7 @@ def _looks_like_profile(record: dict[str, Any]) -> bool:
 
 
 def normalize_candidate(
-    profile: dict[str, Any], index: int, *, head_sales: bool = False, include_project_dates: bool = False
+    profile: dict[str, Any], index: int, *, head_sales: bool = False, include_project_dates: bool = False, peeko: bool = False
 ) -> dict[str, Any]:
     specifics = _linkedin_specifics(profile)
     experience_items, current_positions = _experience_items(profile, specifics)
@@ -106,7 +106,7 @@ def normalize_candidate(
     head_sales_unipile = head_sales and is_unipile
     experiences = [
         _normalize_experience(
-            exp, i, unipile=is_unipile, current_position=current_positions, head_sales=head_sales_unipile
+            exp, i, unipile=is_unipile, current_position=current_positions, head_sales=head_sales_unipile, peeko=peeko
         )
         for i, exp in enumerate(experience_items)
         if isinstance(exp, dict) and (exp or not head_sales_unipile)
@@ -166,10 +166,10 @@ def normalize_candidate(
 
 
 def normalize_candidates(
-    profiles: list[dict[str, Any]], *, head_sales: bool = False, include_project_dates: bool = False
+    profiles: list[dict[str, Any]], *, head_sales: bool = False, include_project_dates: bool = False, peeko: bool = False
 ) -> list[dict[str, Any]]:
     candidates = [
-        normalize_candidate(profile, index, head_sales=head_sales, include_project_dates=include_project_dates)
+        normalize_candidate(profile, index, head_sales=head_sales, include_project_dates=include_project_dates, peeko=peeko)
         for index, profile in enumerate(profiles)
     ]
     used_ids: set[str] = set()
@@ -316,7 +316,9 @@ def candidate_input_issues(
     return issues
 
 
-def merge_duplicate_experiences(experiences: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def merge_duplicate_experiences(
+    experiences: list[dict[str, Any]], *, preserve_employment_details: bool = False,
+) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     by_role: dict[tuple[str, ...], dict[str, Any]] = {}
     for experience in experiences:
@@ -338,11 +340,21 @@ def merge_duplicate_experiences(experiences: list[dict[str, Any]]) -> list[dict[
         existing["experience_skills"] = list(
             dict.fromkeys([*(existing.get("experience_skills") or []), *(experience.get("experience_skills") or [])])
         )
+        if preserve_employment_details:
+            if experience.get("is_current") is True:
+                existing["is_current"] = True
+            if not existing.get("employment_type") and experience.get("employment_type"):
+                existing["employment_type"] = experience["employment_type"]
+            if experience.get("experience_tools"):
+                existing["experience_tools"] = list(dict.fromkeys([
+                    *(existing.get("experience_tools") or []), *experience["experience_tools"],
+                ]))
     return merged
 
 
 def _normalize_experience(
-    exp: dict[str, Any], index: int, *, unipile: bool = False, current_position: bool = False, head_sales: bool = False
+    exp: dict[str, Any], index: int, *, unipile: bool = False, current_position: bool = False,
+    head_sales: bool = False, peeko: bool = False,
 ) -> dict[str, Any]:
     start_value = _first_raw(exp, "startDate", "start", "started_on")
     end_value = _first_raw(exp, "endDate", "end", "ended_on")
@@ -356,10 +368,11 @@ def _normalize_experience(
     # Unipile v1 commonly omits ``end`` for a current role, while v2 returns
     # ``ended_on: null``. Both shapes mean the role is open-ended.
     unipile_open_ended = (
-        unipile
+        unipile and not peeko
         and end_value in (None, "")
         and (bool(start_date) and explicit_current is not False if head_sales else start_value not in (None, ""))
     )
+    tools = _string_list(_first_list(exp.get("tools"), exp.get("technologies"))) if peeko else []
     return {
         "index": index,
         "company_name": company,
@@ -381,6 +394,7 @@ def _normalize_experience(
         "duration": _clean(exp.get("duration")),
         # Kept internal for rubrics that explicitly allow role-attached skills.
         "experience_skills": _string_list(exp.get("skills")),
+        **({"experience_tools": tools} if tools else {}),
     }
 
 

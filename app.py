@@ -386,14 +386,15 @@ def _load_inputs(
     rubric_text = ""
     head_sales = role_key == "head_sales"
     include_project_dates = role_key == "fe_orange"
+    peeko = role_key == "peeko"
     try:
         if json_upload is not None:
             candidates = _candidates_from_json_text(
-                json_upload.getvalue().decode("utf-8"), head_sales, include_project_dates
+                json_upload.getvalue().decode("utf-8"), head_sales, include_project_dates, peeko
             )
         elif sample_path:
             path = Path(sample_path)
-            candidates = _candidates_from_json_path(str(path), path.stat().st_mtime_ns, head_sales, include_project_dates)
+            candidates = _candidates_from_json_path(str(path), path.stat().st_mtime_ns, head_sales, include_project_dates, peeko)
     except Exception as exc:
         st.error(f"Could not read LinkedIn JSON: {exc}")
 
@@ -409,21 +410,21 @@ def _load_inputs(
 
 @st.cache_data(show_spinner=False)
 def _candidates_from_json_text(
-    text: str, head_sales: bool, include_project_dates: bool = False
+    text: str, head_sales: bool, include_project_dates: bool = False, peeko: bool = False
 ) -> list[dict[str, Any]]:
     return normalize_candidates(
         load_profiles_from_text(text, head_sales=head_sales), head_sales=head_sales,
-        include_project_dates=include_project_dates,
+        include_project_dates=include_project_dates, peeko=peeko,
     )
 
 
 @st.cache_data(show_spinner=False)
 def _candidates_from_json_path(
-    path: str, _mtime_ns: int, head_sales: bool, include_project_dates: bool = False
+    path: str, _mtime_ns: int, head_sales: bool, include_project_dates: bool = False, peeko: bool = False
 ) -> list[dict[str, Any]]:
     return normalize_candidates(
         load_profiles(path, head_sales=head_sales), head_sales=head_sales,
-        include_project_dates=include_project_dates,
+        include_project_dates=include_project_dates, peeko=peeko,
     )
 
 
@@ -1100,7 +1101,13 @@ def _rows_to_xlsx_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes
     buffer = io.BytesIO()
     # Build from the currently normalized rows, rather than a saved workbook
     # whose prose or scores may predate the displayed evaluation.
-    pd.DataFrame(rows, columns=columns).to_excel(buffer, index=False, engine="openpyxl")
+    frame = pd.DataFrame(rows, columns=columns)
+    from candidate_evaluator import peeko
+
+    if columns == peeko.OUTPUT_COLUMNS:
+        peeko.write_excel(frame, buffer)
+    else:
+        frame.to_excel(buffer, index=False, engine="openpyxl")
     return buffer.getvalue()
 
 

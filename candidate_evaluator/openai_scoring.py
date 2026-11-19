@@ -351,8 +351,10 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "peeko", "peeko2", "sde3", "fe_orange"}:
-        experiences = merge_duplicate_experiences(experiences, preserve_employment_details=role.key in {"peeko", "peeko2"})
+    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "peeko", "peeko2", "sde3", "fe_orange", "safegold"}:
+        experiences = merge_duplicate_experiences(
+            experiences, preserve_employment_details=role.key in {"peeko", "peeko2", "safegold"}
+        )
     candidate = {**candidate, "experiences": experiences}
     payload = {
         "LinkedIn Profile ID": candidate.get("linkedin_profile_id", ""),
@@ -380,11 +382,11 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
             {field: experience.get(field) for field in role.experience_fields if field in experience}
             for experience in filtered_payload["experiences"]
         ]
-    if role.key in {"sde3", "fe_orange"} and filtered_payload.get("experiences"):
+    if role.key in {"sde3", "fe_orange", "safegold"} and filtered_payload.get("experiences"):
         from .dates import prepare_experience_dates
 
         filtered_payload["experiences"] = prepare_experience_dates(filtered_payload["experiences"], date.today())
-    if role.key == "fe_orange" and filtered_payload.get("Projects"):
+    if role.key in {"fe_orange", "safegold"} and filtered_payload.get("Projects"):
         from .dates import prepare_experience_dates
 
         filtered_payload["Projects"] = prepare_experience_dates(filtered_payload["Projects"], date.today())
@@ -457,6 +459,13 @@ def _response_schema(role: RoleProfile) -> dict[str, Any]:
         }
     model_columns = role.model_grading_columns
     grading_props = _grading_properties(role, model_columns)
+    if role.key == "safegold":
+        from .roles import SAFEGOLD_MEDIUM_COLUMN, SAFEGOLD_MEDIUM_SCORE
+        from .safegold import CHANNEL_COMPONENTS, channel_components_schema
+
+        for column in (*role.component_scoring[SAFEGOLD_MEDIUM_SCORE].columns, SAFEGOLD_MEDIUM_COLUMN):
+            del grading_props[column]
+        grading_props[CHANNEL_COMPONENTS] = channel_components_schema()
     return {
         "type": "object",
         "additionalProperties": False,
@@ -465,7 +474,7 @@ def _response_schema(role: RoleProfile) -> dict[str, Any]:
             "grading": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": model_columns,
+                "required": list(grading_props),
                 "properties": grading_props,
             }
         },

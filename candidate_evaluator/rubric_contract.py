@@ -4,10 +4,13 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .roles import FE_ORANGE_CAPABILITIES, RoleProfile
+from .roles import FE_ORANGE_CAPABILITIES, SAFEGOLD_CAPABILITIES, RoleProfile
+from .safegold import MEDIUM_RULES
 
 
 def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
+    if role.key == "safegold":
+        return _safegold_rubric_issue(rubric_text, role.total_max)
     if role.key == "fe_orange":
         return _fe_orange_rubric_issue(rubric_text)
     if role.key == "peeko2":
@@ -55,6 +58,46 @@ def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
             "This rubric does not match SDE3 LinkedIn scoring. This mode requires the four LinkedIn "
             "capabilities scored by Evidence, Recency and Duration, for a maximum of 62. "
             "Use the bundled SDE3 LinkedIn rubric; technical-assessment rubrics need their own scoring mode."
+        )
+    return ""
+
+
+def _safegold_rubric_issue(rubric_text: str, total_max: float) -> str:
+    text = unicodedata.normalize("NFKC", rubric_text).replace("**", "")
+    capabilities = []
+    channels = []
+    weight_pattern = r"[xX×]\s*(\d+(?:\.\d+)?)"
+    for line in text.splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 3 and cells[0] in SAFEGOLD_CAPABILITIES:
+            weights = tuple(float(value) for value in re.findall(weight_pattern, cells[1]))
+            capabilities.append((cells[0], weights, cells[2]))
+        if len(cells) == 5 and cells[1] in MEDIUM_RULES:
+            weight = re.fullmatch(weight_pattern, cells[3])
+            channels.append((cells[0], cells[1], float(weight[1]) if weight else None, cells[4]))
+    expected_capabilities = [
+        (name, (maximum / 10,), str(maximum))
+        for name, maximum in SAFEGOLD_CAPABILITIES.items()
+        if name != "Customer Support Medium"
+    ]
+    expected_capabilities.append((
+        "Customer Support Medium",
+        tuple(weight for weight, _ in MEDIUM_RULES.values()),
+        str(SAFEGOLD_CAPABILITIES["Customer Support Medium"]),
+    ))
+    expected_channels = [
+        (str(priority), label, weight, f"{weight * 10:g}")
+        for priority, (label, (weight, _)) in enumerate(MEDIUM_RULES.items(), start=1)
+    ]
+    totals = re.findall(r"maximum\s+score\s*:\s*(\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    if capabilities != expected_capabilities or channels != expected_channels or (
+        not totals or any(float(total) != total_max for total in totals)
+    ):
+        return (
+            "This rubric does not match the SafeGold scoring configuration. "
+            "Use the six-capability SafeGold rubric with a maximum of 53 and the configured channel weights."
         )
     return ""
 

@@ -100,7 +100,8 @@ def _looks_like_profile(record: dict[str, Any]) -> bool:
 
 
 def normalize_candidate(
-    profile: dict[str, Any], index: int, *, head_sales: bool = False, include_project_dates: bool = False, peeko: bool = False
+    profile: dict[str, Any], index: int, *, head_sales: bool = False,
+    include_project_dates: bool = False, peeko: bool = False, safegold: bool = False,
 ) -> dict[str, Any]:
     specifics = _linkedin_specifics(profile)
     experience_items, current_positions = _experience_items(profile, specifics)
@@ -108,7 +109,8 @@ def normalize_candidate(
     head_sales_unipile = head_sales and is_unipile
     experiences = [
         _normalize_experience(
-            exp, i, unipile=is_unipile, current_position=current_positions, head_sales=head_sales_unipile, peeko=peeko
+            exp, i, unipile=is_unipile, current_position=current_positions,
+            head_sales=head_sales_unipile, peeko=peeko, safegold=safegold,
         )
         for i, exp in enumerate(experience_items)
         if isinstance(exp, dict) and (exp or not head_sales_unipile)
@@ -168,10 +170,14 @@ def normalize_candidate(
 
 
 def normalize_candidates(
-    profiles: list[dict[str, Any]], *, head_sales: bool = False, include_project_dates: bool = False, peeko: bool = False
+    profiles: list[dict[str, Any]], *, head_sales: bool = False,
+    include_project_dates: bool = False, peeko: bool = False, safegold: bool = False,
 ) -> list[dict[str, Any]]:
     candidates = [
-        normalize_candidate(profile, index, head_sales=head_sales, include_project_dates=include_project_dates, peeko=peeko)
+        normalize_candidate(
+            profile, index, head_sales=head_sales, include_project_dates=include_project_dates,
+            peeko=peeko, safegold=safegold,
+        )
         for index, profile in enumerate(profiles)
     ]
     used_ids: set[str] = set()
@@ -356,7 +362,7 @@ def merge_duplicate_experiences(
 
 def _normalize_experience(
     exp: dict[str, Any], index: int, *, unipile: bool = False, current_position: bool = False,
-    head_sales: bool = False, peeko: bool = False,
+    head_sales: bool = False, peeko: bool = False, safegold: bool = False,
 ) -> dict[str, Any]:
     start_value = _first_raw(exp, "startDate", "start", "started_on")
     end_value = _first_raw(exp, "endDate", "end", "ended_on")
@@ -371,7 +377,7 @@ def _normalize_experience(
     # ``ended_on: null``. Both shapes mean the role is open-ended.
     unipile_open_ended = False
     if unipile and end_value in (None, ""):
-        if peeko:
+        if peeko or safegold:
             try:
                 parsed_start = _parse_date(start_date)
             except ValueError:
@@ -386,7 +392,7 @@ def _normalize_experience(
             unipile_open_ended = bool(start_date) and explicit_current is not False
         else:
             unipile_open_ended = start_value not in (None, "")
-    tools = _string_list(_first_list(exp.get("tools"), exp.get("technologies"))) if peeko else []
+    tools = _string_list(_first_list(exp.get("tools"), exp.get("technologies"))) if peeko or safegold else []
     return {
         "index": index,
         "company_name": company,

@@ -373,6 +373,7 @@ def _default_rubric_path(role_key: str) -> str:
         "sde3": "sde3.md",
         "fe_orange": "fe_orange.md",
         "peeko2": "peeko2.md",
+        "safegold": "safegold.md",
     }
     if role_key in bundled_rubrics:
         bundled = Path(__file__).parent / "rubrics" / bundled_rubrics[role_key]
@@ -386,16 +387,19 @@ def _load_inputs(
     candidates: list[dict[str, Any]] = []
     rubric_text = ""
     head_sales = role_key == "head_sales"
-    include_project_dates = role_key == "fe_orange"
+    include_project_dates = role_key in {"fe_orange", "safegold"}
     peeko = role_key in {"peeko", "peeko2"}
+    safegold = role_key == "safegold"
     try:
         if json_upload is not None:
             candidates = _candidates_from_json_text(
-                json_upload.getvalue().decode("utf-8"), head_sales, include_project_dates, peeko
+                json_upload.getvalue().decode("utf-8"), head_sales, include_project_dates, peeko, safegold
             )
         elif sample_path:
             path = Path(sample_path)
-            candidates = _candidates_from_json_path(str(path), path.stat().st_mtime_ns, head_sales, include_project_dates, peeko)
+            candidates = _candidates_from_json_path(
+                str(path), path.stat().st_mtime_ns, head_sales, include_project_dates, peeko, safegold
+            )
     except Exception as exc:
         st.error(f"Could not read LinkedIn JSON: {exc}")
 
@@ -411,21 +415,23 @@ def _load_inputs(
 
 @st.cache_data(show_spinner=False)
 def _candidates_from_json_text(
-    text: str, head_sales: bool, include_project_dates: bool = False, peeko: bool = False
+    text: str, head_sales: bool, include_project_dates: bool = False,
+    peeko: bool = False, safegold: bool = False,
 ) -> list[dict[str, Any]]:
     return normalize_candidates(
         load_profiles_from_text(text, head_sales=head_sales), head_sales=head_sales,
-        include_project_dates=include_project_dates, peeko=peeko,
+        include_project_dates=include_project_dates, peeko=peeko, safegold=safegold,
     )
 
 
 @st.cache_data(show_spinner=False)
 def _candidates_from_json_path(
-    path: str, _mtime_ns: int, head_sales: bool, include_project_dates: bool = False, peeko: bool = False
+    path: str, _mtime_ns: int, head_sales: bool, include_project_dates: bool = False,
+    peeko: bool = False, safegold: bool = False,
 ) -> list[dict[str, Any]]:
     return normalize_candidates(
         load_profiles(path, head_sales=head_sales), head_sales=head_sales,
-        include_project_dates=include_project_dates, peeko=peeko,
+        include_project_dates=include_project_dates, peeko=peeko, safegold=safegold,
     )
 
 

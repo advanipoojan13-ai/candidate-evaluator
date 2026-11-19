@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from .roles import RoleProfile, get_role_profile
+from .roles import SAFEGOLD_MEDIUM_SCORE, RoleProfile, get_role_profile
 
 
 SDE3_RATIONALE_MAX_WORDS = 150
@@ -38,7 +38,7 @@ def normalize_rationale_row(
     """Cap rationale for roles with export-time limits, preserving numeric scores."""
     role = _resolve_role(role_or_key)
     normalized = dict(row)
-    if role.key in {"sde3", "fe_orange"} and "Score Rationale" in normalized:
+    if role.key in {"sde3", "fe_orange", "safegold"} and "Score Rationale" in normalized:
         normalized["Score Rationale"] = limit_rationale(
             str(normalized["Score Rationale"] or ""), max_words=role.rationale_max_words
         )
@@ -184,12 +184,22 @@ def apply_calculated_fields(
             {key: row[key] for key in scoring.grading_schema()["required"] if key in row}, candidate, date.today(),
         )
     calculated = dict(row)
+    medium_multiplier = None
+    if role.key == "safegold":
+        from .safegold import apply_support_medium
+
+        medium_multiplier = apply_support_medium(calculated)
 
     for category_column, rule in (role.component_scoring or {}).items():
         component_values = [calculated.get(column) for column in rule.columns]
         if all(_is_number(value) for value in component_values):
             raw_score = sum(float(value) for value in component_values)
-            weighted_score = raw_score * rule.multiplier
+            multiplier = (
+                medium_multiplier
+                if category_column == SAFEGOLD_MEDIUM_SCORE and medium_multiplier is not None
+                else rule.multiplier
+            )
+            weighted_score = raw_score * multiplier
             if math.isfinite(weighted_score):
                 calculated[category_column] = round(weighted_score, 10)
 
@@ -211,7 +221,7 @@ def apply_calculated_fields(
 
     experiences = candidate.get("experiences") or []
     current = next((experience for experience in experiences if experience.get("is_current")), None)
-    current = current or (experiences[0] if experiences else {})
+    current = current or (experiences[0] if experiences and role.key != "safegold" else {})
     if "Current Company" in role.grading_columns:
         calculated["Current Company"] = current.get("company_name", "")
     if "Current Title" in role.grading_columns:

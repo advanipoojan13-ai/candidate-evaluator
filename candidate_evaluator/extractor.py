@@ -165,6 +165,9 @@ def normalize_candidate(
         "services": services,
         "services_present": services_present,
     }
+    from .url_links import extract_links
+
+    candidate["url_entries"] = extract_links(profile)
     candidate["source_row"] = build_source_row(candidate)
     return candidate
 
@@ -236,6 +239,8 @@ def candidate_input_issue(
     skip_if_no_evidence: bool = True,
 ) -> str:
     """Return why one record should be skipped before making an API call."""
+    if role_key == "portfolio_links":
+        return ""
     reasons = []
     if candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial":
         reasons.append("Unipile returned a partial profile; retrieve the complete profile before evaluation")

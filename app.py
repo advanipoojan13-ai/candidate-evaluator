@@ -385,7 +385,7 @@ def _load_inputs(
     json_upload: Any, sample_path: str, rubric_upload: Any, rubric_path: str, role_key: str
 ) -> tuple[list[dict[str, Any]], str]:
     candidates: list[dict[str, Any]] = []
-    rubric_text = ""
+    rubric_text = "Local URL extraction" if role_key == "portfolio_links" else ""
     head_sales = role_key == "head_sales"
     include_project_dates = role_key in {"fe_orange", "safegold"}
     peeko = role_key in {"peeko", "peeko2"}
@@ -593,7 +593,8 @@ def _show_run_controls(
         if active_rubric_issue:
             st.error(active_rubric_issue)
             st.stop()
-        _require_api_ready(api_key, approved, provider_key)
+        if role_key != "portfolio_links":
+            _require_api_ready(api_key, approved, provider_key)
         if active_run:
             _require_run_provider(active_run, provider_key)
         if not active_run:
@@ -616,7 +617,8 @@ def _show_run_controls(
         if saved_rubric_issue:
             st.error(saved_rubric_issue)
             st.stop()
-        _require_api_ready(api_key, approved, provider_key)
+        if role_key != "portfolio_links":
+            _require_api_ready(api_key, approved, provider_key)
         _require_run_provider(selected_run, provider_key)
         _run_evaluation(selected_run, api_key, parallel_calls, retry_failed=True)
         ran_evaluation = True

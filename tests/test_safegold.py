@@ -130,12 +130,19 @@ def test_unipile_does_not_mark_ended_invalid_or_explicit_noncurrent_roles_curren
     assert (row["Current Company"], row["Current Title"]) == ("", "")
 
 
-@pytest.mark.parametrize("count,points", [(0, 0), (1, 4), (2, 6), (3, 8), (4, 10), (5, 10)])
-def test_distinct_support_channel_score_and_order(count, points):
-    channels = (*reversed(CHANNELS[:count]), *CHANNELS[:1]) if count else ()
-    row = scored(grading((0, points, 0, 0), channels))
+@pytest.mark.parametrize("channels,points", [
+    ((), 0),
+    (CHANNELS[:1], 8),
+    (CHANNELS[1:2], 6),
+    (CHANNELS[:2], 10),
+    (CHANNELS[2:], 0),
+    (CHANNELS, 10),
+])
+def test_support_channel_reporting_deduplicates_and_keeps_rubric_score(channels, points):
+    reported = (*reversed(channels), *channels[:1])
+    row = scored(grading((0, points, 0, 0), reported))
     assert row[SUPPORT_CHANNELS] == row[ROLE.total_column] == points
-    assert row[SAFEGOLD_CHANNELS_COLUMN] == (" | ".join(CHANNELS[:count]) or "Not stated")
+    assert row[SAFEGOLD_CHANNELS_COLUMN] == (" | ".join(channels) or "Not stated")
 
 
 def test_maximum_and_exact_export_columns():
@@ -174,12 +181,17 @@ def test_ranking_uses_criterion_order_then_name():
 @pytest.mark.parametrize("old,new", [
     ("Maximum Score:** 40", "Maximum Score:** 53"),
     ("| Customer-Facing Experience | 15 |", "| Customer-Facing Experience | 14 |"),
-    ("| 2 | 6 |", "| 2 | 5 |"),
     ("| Arabic not mentioned | 0 |", "| Arabic not mentioned | 1 |"),
 ])
 def test_rubric_rejects_mismatched_scoring(old, new):
     assert old in RUBRIC
     assert "does not match" in rubric_input_issue(RUBRIC.replace(old, new), ROLE)
+
+
+def test_channel_points_can_change_in_the_rubric():
+    phone_tier = "without qualifying Live Chat / Messaging evidence | 8 |"
+    assert phone_tier in RUBRIC
+    assert not rubric_input_issue(rubric_text=RUBRIC.replace(phone_tier, phone_tier.replace("8", "7")), role=ROLE)
 
 
 def test_schema_requests_fixed_scores_without_calculated_fields():
@@ -189,6 +201,7 @@ def test_schema_requests_fixed_scores_without_calculated_fields():
     for column, allowed in ROLE.allowed_scores.items():
         assert schema["properties"][column]["type"] == "integer"
         assert schema["properties"][column]["enum"] == sorted(allowed)
+    assert schema["properties"][SUPPORT_CHANNELS] == {"type": "integer", "minimum": 0, "maximum": 10}
     assert schema["properties"][SAFEGOLD_CHANNELS_COLUMN]["items"]["enum"] == list(CHANNELS)
 
 
@@ -196,7 +209,8 @@ def test_schema_requests_fixed_scores_without_calculated_fields():
     ({FACING: 14}, "JSON integer"),
     ({BANKING: "3"}, "JSON integer"),
     ({ARABIC: True}, "JSON integer"),
-    ({SUPPORT_CHANNELS: 6}, "0 distinct channels"),
+    ({SUPPORT_CHANNELS: 6}, "requires at least one qualifying channel"),
+    ({SUPPORT_CHANNELS: 11}, "JSON integer from 0 to 10"),
     ({SAFEGOLD_CHANNELS_COLUMN: ["Unknown"]}, "channel categories"),
     ({"Arabic Unverified": "No"}, "must match"),
 ])
@@ -208,7 +222,7 @@ def test_rejects_inconsistent_model_grading(values, message):
 @pytest.mark.parametrize("provider", ["openai", "deepseek"])
 def test_provider_path_accepts_valid_candidate_and_rejects_invalid_candidate(monkeypatch, provider):
     valid = grading((15, 10, 10, 5), CHANNELS)
-    invalid = grading((0, 6, 0, 0), CHANNELS[:1])
+    invalid = grading((0, 6, 0, 0))
     data = {"evaluations": [
         {"candidate_number": 1, "grading": valid},
         {"candidate_number": 2, "grading": invalid},
@@ -223,7 +237,43 @@ def test_provider_path_accepts_valid_candidate_and_rejects_invalid_candidate(mon
     result = _evaluate_candidate_batch_for_run("fake", "test", RUBRIC, [candidate(), candidate()], ROLE, provider)
     first, second = result["results"]
     assert first["state"] == "completed" and first["row"][ROLE.total_column] == 40
-    assert second["state"] == "failed" and "1 distinct channels" in second["error"]
+    assert second["state"] == "failed" and "requires at least one qualifying channel" in second["error"]
+
+
+def test_provider_uses_uploaded_channel_priority_rules(monkeypatch):
+    # Use a different pair of point values to catch an accidental hard-coded ladder.
+    priority_table = (
+        "| Qualifying support channel evidence | Points |\n"
+        "|---|---:|\n"
+        "| Calls and chat | 10 |\n"
+        "| Calls without chat | 7 |\n"
+        "| Chat without calls | 5 |\n"
+        "| Neither calls nor chat | 0 |\n"
+    )
+    before, channel_section = RUBRIC.split("## 5.2 Scoring\n\n", 1)
+    _, after = channel_section.split("# 6. ", 1)
+    rubric = before + "## 5.2 Scoring\n\n" + priority_table + "\n---\n\n# 6. " + after
+    assert not rubric_input_issue(rubric, ROLE)
+    cases = [(CHANNELS[:2], 10), (CHANNELS[:1], 7), (CHANNELS[1:2], 5), (CHANNELS[2:], 0), ((), 0)]
+    evaluations = [
+        {"candidate_number": i, "grading": grading((0, points, 0, 0), channels)}
+        for i, (channels, points) in enumerate(cases, start=1)
+    ]
+
+    def respond(**kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        assert "Calls without chat | 7" in prompt
+        assert "Assign the channel score from that count" not in prompt
+        message = SimpleNamespace(content=json.dumps({"evaluations": evaluations}))
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=respond)))
+    monkeypatch.setattr(openai_scoring, "OpenAI", lambda **kwargs: client)
+    result = _evaluate_candidate_batch_for_run("fake", "test", rubric, [candidate()] * len(cases), ROLE, "openai")
+    assert [item.get("error") for item in result["results"] if item["state"] != "completed"] == []
+    rows = [item["row"] for item in result["results"]]
+    assert [row[SUPPORT_CHANNELS] for row in rows] == [10, 7, 5, 0, 0]
+    assert rows[3][SAFEGOLD_CHANNELS_COLUMN] == " | ".join(CHANNELS[2:])
 
 
 def test_previous_runs_export_original_scores_and_reject_resuming(tmp_path, monkeypatch):

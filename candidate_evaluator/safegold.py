@@ -1,6 +1,6 @@
 """Validate SafeGold model grades and format the channel evidence for export."""
 
-from .roles import SAFEGOLD_CHANNELS_COLUMN
+from .roles import SAFEGOLD_CHANNELS_COLUMN, SAFEGOLD_CHANNEL_SCORE, SAFEGOLD_SCORES
 
 
 CHANNELS = (
@@ -10,7 +10,6 @@ CHANNELS = (
     "Social Media Customer Support",
     "Other Direct Customer Support Channels",
 )
-CHANNEL_POINTS = (0, 4, 6, 8, 10, 10)
 
 LEGACY_TOTAL = "Final Score (/53)"
 LEGACY_SCORES = [
@@ -39,9 +38,12 @@ def normalize_grading(row: dict, allowed_scores: dict[str, set[float]]) -> None:
     if not isinstance(reported_channels, list) or any(channel not in CHANNELS for channel in reported_channels):
         raise ValueError("Return an array of qualifying SafeGold support channel categories.")
     channels = [channel for channel in CHANNELS if channel in reported_channels]
-    points = CHANNEL_POINTS[len(channels)]
-    if row["Customer Support Channels Score (/10)"] != points:
-        raise ValueError(f"Customer Support Channels Score (/10) must be {points} for {len(channels)} distinct channels.")
+    points = row.get(SAFEGOLD_CHANNEL_SCORE)
+    maximum = SAFEGOLD_SCORES[SAFEGOLD_CHANNEL_SCORE]
+    if type(points) is not int or not 0 <= points <= maximum:
+        raise ValueError(f"{SAFEGOLD_CHANNEL_SCORE} must be a JSON integer from 0 to {maximum}.")
+    if points and not channels:
+        raise ValueError(f"{SAFEGOLD_CHANNEL_SCORE} requires at least one qualifying channel for a nonzero score.")
     row[SAFEGOLD_CHANNELS_COLUMN] = " | ".join(channels) or "Not stated"
 
     arabic_unverified = "Yes" if row["Arabic Language Score (/5)"] == 0 else "No"

@@ -7,7 +7,6 @@ import unicodedata
 from .roles import (
     FE_ORANGE_CAPABILITIES, SAFEGOLD_ALLOWED_SCORES, SAFEGOLD_CAPABILITIES, SAFEGOLD_TOTAL, RoleProfile,
 )
-from .safegold import CHANNEL_POINTS
 
 
 def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
@@ -83,19 +82,11 @@ def _safegold_rubric_issue(rubric_text: str) -> str:
         sorted(row[-1] for row in table)
         for table in [*evidence_tables, *arabic_tables]
     ]
-    expected_tiers = [
-        sorted(map(str, scores)) for column, scores in SAFEGOLD_ALLOWED_SCORES.items()
-        if column != "Customer Support Channels Score (/10)"
-    ]
-    channel_rows = [
-        (label, str(CHANNEL_POINTS[count]))
-        for label, count in (("4 or more", 4), ("3", 3), ("2", 2), ("1", 1), ("None explicitly established", 0))
-    ]
+    expected_tiers = [sorted(map(str, scores)) for scores in SAFEGOLD_ALLOWED_SCORES.values()]
     totals = re.findall(r"maximum\s+score\s*:\s*(\d+(?:\.\d+)?)", text, re.IGNORECASE)
     if (
         tables.get(("Capability", "Maximum Score")) != [capabilities + [("Total", str(total))]]
         or tables.get(("Criterion", "Maximum")) != [capabilities + [("Final Score", str(total))]]
-        or tables.get(("Distinct qualifying channels", "Points")) != [channel_rows]
         or evidence_tiers != expected_tiers
         or SAFEGOLD_TOTAL not in text
         or not totals
@@ -103,7 +94,7 @@ def _safegold_rubric_issue(rubric_text: str) -> str:
     ):
         return (
             "This rubric does not match the SafeGold scoring configuration. "
-            "Use the four-criterion SafeGold rubric with a maximum of 40 and fixed score tiers."
+            "Use the four-criterion SafeGold rubric with a maximum of 40 and the configured non-channel score tiers."
         )
     return ""
 

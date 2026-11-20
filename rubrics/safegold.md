@@ -38,7 +38,7 @@ No candidate should be automatically rejected for missing Arabic, banking experi
 6. Explicitly customer-facing job titles can establish customer-facing experience even when descriptions are missing.
 7. Do not assume candidates personally performed activities simply because their employer offers those services.
 8. Do not reward repeated mentions of the same keyword.
-9. Multiple qualifying customer support channels should be rewarded according to the channel scoring rules.
+9. Score qualifying phone and chat support according to Section 5.2.
 10. Banking terminology can receive partial credit, but demonstrated hands-on work should receive higher credit.
 11. Missing information receives zero for the relevant criterion without automatic rejection.
 12. Do not add undocumented bonuses, penalties, rejection rules, or scoring adjustments.
@@ -188,9 +188,9 @@ Equivalent wording qualifies when it clearly establishes external customer-facin
 
 ## Objective
 
-Identify candidates who have handled customer queries across multiple communication channels.
+Identify candidates who have supported customers through phone calls, live chat or messaging, or both.
 
-Count channels mentioned across any permitted LinkedIn field or previous role.
+Review any permitted LinkedIn field and any current or previous role for qualifying channel evidence.
 
 A channel qualifies only when it is explicitly connected to customer support or customer service.
 
@@ -301,36 +301,36 @@ Qualifying examples:
 - Walk-In Customer Support
 - Customer Service Counter
 
-Count this as one additional channel category, regardless of how many qualifying methods are mentioned within it.
+Report these methods under one channel category, regardless of how many qualifying methods are mentioned.
 
-## 5.2 Channel Scoring
+## 5.2 Scoring
 
-| Distinct qualifying channels | Points |
+| Support channel evidence | Points |
 |---|---:|
-| 4 or more | 10 |
-| 3 | 8 |
-| 2 | 6 |
-| 1 | 4 |
-| None explicitly established | 0 |
+| Explicit evidence of both Phone / Calls and Live Chat / Messaging for customer support | 10 |
+| Explicit evidence of Phone / Calls for customer support without qualifying Live Chat / Messaging evidence | 8 |
+| Explicit evidence of Live Chat / Messaging for customer support without qualifying Phone / Calls evidence | 6 |
+| No qualifying evidence of either Phone / Calls or Live Chat / Messaging | 0 |
+
+Use the highest supported scoring row once. Do not add points across rows.
 
 ### Channel Scoring Rules
 
-1. Count each channel category only once.
-2. Phone and calls are the same channel.
-3. Live chat and WhatsApp are the same channel.
-4. Instagram and Facebook support are the same social media channel.
-5. Multiple tools within one channel do not increase the channel count.
-6. Channels may come from different roles or different permitted LinkedIn sections.
-7. A channel does not qualify merely because the candidate used the platform for sales, marketing, or internal communication.
-8. Do not adjust scores based on when or how long the candidate used a channel.
+1. Qualifying calls and chat evidence may come from different roles or different permitted LinkedIn sections.
+2. Phone, voice support, and customer support calls belong to the same channel. Live chat and WhatsApp customer support belong to the same channel.
+3. Email, social media customer support, and other direct customer support channels earn zero points. Report them in **Identified Customer Support Channels** when they qualify.
+4. Report each qualifying channel category once. Multiple tools, platforms, or mentions within a category do not change the score.
+5. Exclude channels used only for sales, marketing, recruitment, or internal communication.
+6. Do not adjust scores based on when or how long the candidate used a channel.
 
 **Examples:**
 
-- Phone + Email = 6 points
-- Phone + Chat + Email = 8 points
-- Phone + Chat + Email + Instagram = 10 points
-- WhatsApp + Live Chat = 4 points
-- Instagram Marketing + Email Marketing = 0 points
+- Phone support + WhatsApp customer support = 10 points
+- Phone support + email support = 8 points
+- Live chat + WhatsApp customer support = 6 points
+- Live chat + email support = 6 points
+- Email support + social media customer support = 0 points
+- Sales calls + Instagram marketing = 0 points
 
 ---
 
@@ -680,8 +680,8 @@ Do not repeat every individual score.
 4. Generic operations titles do not establish customer-facing experience.
 5. Direct customer support responsibilities in operations roles qualify.
 6. Customer support channels may be identified across different jobs.
-7. Different platforms within the same channel category count as one channel.
-8. Phone and email are two channels; phone and inbound calls are one.
+7. Report different platforms within the same qualifying channel category once.
+8. Use phone and chat evidence for channel points. Report qualifying email, social media, and other direct support channels without awarding points.
 9. WhatsApp and live chat count as one channel category.
 10. Instagram and Facebook customer support count as one social media category.
 11. Sales calls do not qualify as phone-based customer support.

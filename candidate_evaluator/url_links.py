@@ -8,22 +8,10 @@ OUTPUT_COLUMNS = [
     "Candidate", "Profile URL", "Link Found", "GitHub URLs",
     "Website / Portfolio URLs", "Project / Demo URLs", "Other URLs", "URL Sources",
 ]
-# Metadata contains provider-generated URLs, rather than candidate-shared work.
-EXCLUDED = {
-    "moreprofiles", "interests", "companylogo", "schoollogo", "profilepicture",
-    "profilephoto", "photo", "image", "images", "sizes", "backgroundpicture",
-    "certifications", "licenses", "skills", "topskills", "location", "languages",
-    "startdate", "enddate", "registeredat", "education", "recommendations",
-}
-METADATA_KEYS = {
-    "linkedinurl", "companylinkedinurl", "schoollinkedinurl", "associatedwithlink",
-    "companyurl", "companywebsite", "companyname", "companyuniversalname",
-    "associatedwith", "schoolname", "logourl", "pictureurl", "avatar", "avatarurl",
-}
 URL_PATTERN = re.compile(
     r"(?:https?://|www\.)[^\s<>\"']+|"
     r"(?<![\w@/])(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+"
-    r"(?:com|org|net|io|dev|app|me|ai|co|in|tech|site|xyz|pages|design|bio)"
+    r"[a-zA-Z]{2,63}"
     r"(?![a-zA-Z0-9.-])(?:/[^\s<>\"']*)?", re.IGNORECASE,
 )
 
@@ -35,9 +23,6 @@ def extract_links(profile):
     def visit(value, path):
         if isinstance(value, dict):
             for key, child in value.items():
-                lower = key.casefold().replace("_", "")
-                if lower in EXCLUDED or lower in METADATA_KEYS:
-                    continue
                 visit(child, f"{path}.{key}" if path else key)
         elif isinstance(value, list):
             for index, child in enumerate(value):
@@ -53,12 +38,10 @@ def extract_links(profile):
                     port = parsed.port
                 except ValueError:
                     continue
-                if not host or host == "linkedin.com" or host.endswith(".linkedin.com"):
-                    continue
-                if host == "licdn.com" or host.endswith(".licdn.com"):
+                if not host:
                     continue
                 # Host matching is case-insensitive. Preserve path/query case and parameters.
-                identity = (host, port, parsed.path.rstrip("/"), parsed.query, parsed.fragment)
+                identity = (parsed.scheme.lower(), host, port, parsed.path, parsed.query, parsed.fragment)
                 entry = found.setdefault(identity, {"url": original, "sources": [], "category": classify(host, path)})
                 if path not in entry["sources"]:
                     entry["sources"].append(path)
@@ -67,6 +50,8 @@ def extract_links(profile):
 
 
 def classify(host, path):
+    if host == "linkedin.com" or host.endswith((".linkedin.com", ".licdn.com")):
+        return "Other URLs"
     if host == "github.com" or host.endswith(".github.com"):
         return "GitHub URLs"
     if re.search(r"(?:^|\.)(?:websites?|contact_info|contactInfo|portfolio)(?:[.\[]|$)", path):

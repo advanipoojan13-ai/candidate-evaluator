@@ -26,8 +26,10 @@ def test_nested_fields(field):
 
 
 @pytest.mark.parametrize("field", ["moreProfiles", "companyLogo", "profilePicture", "certifications", "skills", "location", "education"])
-def test_metadata_excluded(field):
-    assert extract_links({field: {"url": "https://example.com/a"}}) == []
+def test_every_field_is_scanned(field):
+    links = extract_links({field: {"url": "https://example.com/a"}})
+    assert links[0]["url"] == "https://example.com/a"
+    assert links[0]["sources"] == [field + ".url"]
 
 
 def test_multiple_duplicate_urls_preserve_paths_and_queries():
@@ -47,8 +49,10 @@ def test_bare_domain_and_parentheses():
     assert [x["url"] for x in links] == ["ravivarma.pages.dev", "www.example.com/work"]
 
 
-def test_mail_and_linkedin_images_excluded():
-    assert extract_links({"about": "me@example.com https://linkedin.com/in/me https://media.licdn.com/a"}) == []
+def test_linkedin_and_images_retained_in_other_urls():
+    links = extract_links({"about": "me@example.com https://linkedin.com/in/me https://media.licdn.com/a"})
+    assert [entry["url"] for entry in links] == ["https://linkedin.com/in/me", "https://media.licdn.com/a"]
+    assert all(entry["category"] == "Other URLs" for entry in links)
 
 
 def test_nulls_and_numbers():
@@ -57,7 +61,7 @@ def test_nulls_and_numbers():
 
 @pytest.mark.parametrize("has_links", [True, False])
 def test_normal_entry_point_no_api_and_exports(has_links):
-    profile = {"publicIdentifier": "sample", "firstName": "Sample",
+    profile = {"firstName": "Sample",
                "about": "https://github.com/sample/repo" if has_links else ""}
     candidate = normalize_candidate(profile, 0)
     role = get_role_profile("portfolio_links")
@@ -102,6 +106,45 @@ def test_application_batch_and_saved_run(tmp_path, monkeypatch):
     assert result_rows("urls")[0]["GitHub URLs"] == "https://github.com/me"
 
 
-def test_company_and_project_association_names_are_not_project_links():
-    assert extract_links({"experience": [{"companyName": "Cerebrone.ai"}],
-                          "projects": [{"associatedWith": "iNeuron.ai"}]}) == []
+def test_company_names_and_associations_are_retained():
+    links = extract_links({"experience": [{"companyName": "Cerebrone.ai"}],
+                           "projects": [{"associatedWith": "iNeuron.ai"}]})
+    assert {entry["url"] for entry in links} == {"Cerebrone.ai", "iNeuron.ai"}
+
+
+def test_uncommon_domains_are_not_missed():
+    links = extract_links({"about": "me.engineering/work me.cloud me.photography"})
+    assert [entry["url"] for entry in links] == ["me.engineering/work", "me.cloud", "me.photography"]
+
+
+def test_other_urls_are_separate_lines_in_csv_and_excel():
+    candidate = normalize_candidate({"firstName": "Test", "unknown": [
+        "https://one.example.com/path", "https://two.example.com/path"
+    ]}, 0)
+    row = evaluate(candidate)
+    expected = "https://one.example.com/path\nhttps://two.example.com/path"
+    assert row["Other URLs"] == expected
+    import csv
+    parsed = list(csv.DictReader(io.StringIO(app._rows_to_csv_bytes([row], OUTPUT_COLUMNS).decode("utf-8"))))
+    assert parsed[0]["Other URLs"] == expected
+    import openpyxl
+    book = openpyxl.load_workbook(io.BytesIO(app._rows_to_xlsx_bytes([row], OUTPUT_COLUMNS)))
+    assert book.active.cell(2, 7).value == expected
+    assert book.active.cell(2, 7).alignment.wrap_text is True
+    assert book["All URLs"].cell(2, 4).value == expected.splitlines()[0]
+    assert book["All URLs"].cell(3, 4).value == expected.splitlines()[1]
+
+
+def test_different_schemes_and_paths_remain_separate():
+    links = extract_links({"about": "http://example.com/a https://example.com/a https://example.com/a/"})
+    assert len(links) == 3
+
+
+def test_excel_long_summary_retains_all_links_in_detail_sheet():
+    urls = ["https://example.com/" + str(index) + "/" + "x" * 200 for index in range(170)]
+    candidate = normalize_candidate({"firstName": "Test", "links": urls}, 0)
+    row = evaluate(candidate)
+    import openpyxl
+    book = openpyxl.load_workbook(io.BytesIO(app._rows_to_xlsx_bytes([row], OUTPUT_COLUMNS)))
+    assert "See All URLs sheet" in book["Candidates"].cell(2, 7).value
+    assert [r[3] for r in book["All URLs"].iter_rows(min_row=2, values_only=True)] == urls

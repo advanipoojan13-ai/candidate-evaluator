@@ -382,14 +382,19 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
             {field: experience.get(field) for field in role.experience_fields if field in experience}
             for experience in filtered_payload["experiences"]
         ]
-    if role.key in {"sde3", "fe_orange", "safegold"} and filtered_payload.get("experiences"):
+    if role.key in {"sde3", "fe_orange"} and filtered_payload.get("experiences"):
         from .dates import prepare_experience_dates
 
         filtered_payload["experiences"] = prepare_experience_dates(filtered_payload["experiences"], date.today())
-    if role.key in {"fe_orange", "safegold"} and filtered_payload.get("Projects"):
+    if role.key == "fe_orange" and filtered_payload.get("Projects"):
         from .dates import prepare_experience_dates
 
         filtered_payload["Projects"] = prepare_experience_dates(filtered_payload["Projects"], date.today())
+    if role.key == "safegold" and filtered_payload.get("Projects"):
+        filtered_payload["Projects"] = [
+            {field: project[field] for field in ("name", "description", "technologies") if field in project}
+            for project in filtered_payload["Projects"]
+        ]
     return filtered_payload
 
 
@@ -460,12 +465,12 @@ def _response_schema(role: RoleProfile) -> dict[str, Any]:
     model_columns = role.model_grading_columns
     grading_props = _grading_properties(role, model_columns)
     if role.key == "safegold":
-        from .roles import SAFEGOLD_MEDIUM_COLUMN, SAFEGOLD_MEDIUM_SCORE
-        from .safegold import CHANNEL_COMPONENTS, channel_components_schema
+        from .roles import SAFEGOLD_CHANNELS_COLUMN
+        from .safegold import CHANNELS
 
-        for column in (*role.component_scoring[SAFEGOLD_MEDIUM_SCORE].columns, SAFEGOLD_MEDIUM_COLUMN):
-            del grading_props[column]
-        grading_props[CHANNEL_COMPONENTS] = channel_components_schema()
+        grading_props[SAFEGOLD_CHANNELS_COLUMN] = {
+            "type": "array", "items": {"type": "string", "enum": list(CHANNELS)},
+        }
     return {
         "type": "object",
         "additionalProperties": False,

@@ -1,71 +1,49 @@
-"""Channel selection and component scoring for SafeGold customer support."""
+"""Validate SafeGold model grades and format the channel evidence for export."""
 
-from .roles import SAFEGOLD_COMPONENTS, SAFEGOLD_MEDIUM_COLUMN, SAFEGOLD_MEDIUM_SCORE
-
-
-CHANNEL_COMPONENTS = "Support Channel Components"
-COMPONENT_MAXIMA = {"evidence": 4, "recency": 3, "duration": 3}
-MEDIUM_RULES = {
-    "Calls + Chat": (1.0, ("Calls", "Chat")),
-    "Calls": (0.8, ("Calls",)),
-    "Chat": (0.6, ("Chat",)),
-    "Email": (0.4, ("Email",)),
-    "Social Media": (0.2, ("Social Media",)),
-}
-CHANNELS = tuple(label for label, (_, channels) in MEDIUM_RULES.items() if len(channels) == 1)
+from .roles import SAFEGOLD_CHANNELS_COLUMN
 
 
-def channel_components_schema() -> dict:
-    channel = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": list(COMPONENT_MAXIMA),
-        "properties": {
-            name: {"type": "integer", "minimum": int(name == "evidence"), "maximum": maximum}
-            for name, maximum in COMPONENT_MAXIMA.items()
-        },
-    }
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": list(CHANNELS),
-        "properties": {name: {"anyOf": [channel, {"type": "null"}]} for name in CHANNELS},
-    }
+CHANNELS = (
+    "Phone / Calls",
+    "Live Chat / Messaging",
+    "Email",
+    "Social Media Customer Support",
+    "Other Direct Customer Support Channels",
+)
+CHANNEL_POINTS = (0, 4, 6, 8, 10, 10)
+
+LEGACY_TOTAL = "Final Score (/53)"
+LEGACY_SCORES = [
+    "Frontline Customer Support Score (/10)",
+    "Issue Resolution, Complaints & Escalations Score (/12)",
+    "KYC, AML/CFT, Disputes & Fraud Score (/8)",
+    "Partner Support, Case Records & Support Tools Score (/8)",
+    "Recurring Issues, Feedback & Support Content Score (/5)",
+    "Customer Support Medium Score (/10)",
+]
+LEGACY_OUTPUT_COLUMNS = [
+    "Rank Number", "Candidate", "Profile URL", "Current Company", "Current Title",
+    *LEGACY_SCORES, LEGACY_TOTAL, "Selected Customer Support Medium",
+    "Frontline Customer Support Unverified", "Issue Resolution, Complaints & Escalations Unverified",
+    "Date-Quality Warning", "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
+]
 
 
-def apply_support_medium(row: dict) -> float:
-    """Validate model components, fill C6, and return its multiplier."""
-    for category, rule in SAFEGOLD_COMPONENTS.items():
-        if category == SAFEGOLD_MEDIUM_SCORE:
-            continue
-        for column, maximum in rule.column_maxima:
-            value = row.get(column)
-            if type(value) is not int or not 0 <= value <= maximum:
-                raise ValueError(f"{column} must be a JSON integer from 0 to {maximum}.")
+def normalize_grading(row: dict, allowed_scores: dict[str, set[float]]) -> None:
+    for column, scores in allowed_scores.items():
+        value = row.get(column)
+        if type(value) is not int or value not in scores:
+            raise ValueError(f"{column} must be a JSON integer from {sorted(scores)}.")
 
-    channels = row.get(CHANNEL_COMPONENTS)
-    if not isinstance(channels, dict) or channels.keys() != set(CHANNELS):
-        raise ValueError("Provide a component entry for each SafeGold support channel.")
-    for name, entry in channels.items():
-        if entry is None:
-            continue
-        if not isinstance(entry, dict) or entry.keys() != COMPONENT_MAXIMA.keys():
-            raise ValueError(f"{name} must contain all three support channel components or be null.")
-        for component, maximum in COMPONENT_MAXIMA.items():
-            value = entry[component]
-            minimum = int(component == "evidence")
-            if type(value) is not int or not minimum <= value <= maximum:
-                raise ValueError(f"{name} {component} must be a JSON integer from {minimum} to {maximum}.")
+    reported_channels = row.get(SAFEGOLD_CHANNELS_COLUMN)
+    if not isinstance(reported_channels, list) or any(channel not in CHANNELS for channel in reported_channels):
+        raise ValueError("Return an array of qualifying SafeGold support channel categories.")
+    channels = [channel for channel in CHANNELS if channel in reported_channels]
+    points = CHANNEL_POINTS[len(channels)]
+    if row["Customer Support Channels Score (/10)"] != points:
+        raise ValueError(f"Customer Support Channels Score (/10) must be {points} for {len(channels)} distinct channels.")
+    row[SAFEGOLD_CHANNELS_COLUMN] = " | ".join(channels) or "Not stated"
 
-    label, multiplier, chosen = next(
-        (
-            (label, weight, required)
-            for label, (weight, required) in MEDIUM_RULES.items()
-            if all(channels[channel] is not None for channel in required)
-        ),
-        ("", 0.0, ()),
-    )
-    row[SAFEGOLD_MEDIUM_COLUMN] = label
-    for column, component in zip(SAFEGOLD_COMPONENTS[SAFEGOLD_MEDIUM_SCORE].columns, COMPONENT_MAXIMA):
-        row[column] = min((channels[channel][component] for channel in chosen), default=0)
-    return multiplier
+    arabic_unverified = "Yes" if row["Arabic Language Score (/5)"] == 0 else "No"
+    if row.get("Arabic Unverified") != arabic_unverified:
+        raise ValueError("Arabic Unverified must match the Arabic Language Score (/5).")

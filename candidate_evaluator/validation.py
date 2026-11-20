@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from .roles import SAFEGOLD_MEDIUM_SCORE, RoleProfile, get_role_profile
+from .roles import RoleProfile, get_role_profile
 
 
 SDE3_RATIONALE_MAX_WORDS = 150
@@ -184,22 +184,16 @@ def apply_calculated_fields(
             {key: row[key] for key in scoring.grading_schema()["required"] if key in row}, candidate, date.today(),
         )
     calculated = dict(row)
-    medium_multiplier = None
     if role.key == "safegold":
-        from .safegold import apply_support_medium
+        from .safegold import normalize_grading
 
-        medium_multiplier = apply_support_medium(calculated)
+        normalize_grading(calculated, role.allowed_scores)
 
     for category_column, rule in (role.component_scoring or {}).items():
         component_values = [calculated.get(column) for column in rule.columns]
         if all(_is_number(value) for value in component_values):
             raw_score = sum(float(value) for value in component_values)
-            multiplier = (
-                medium_multiplier
-                if category_column == SAFEGOLD_MEDIUM_SCORE and medium_multiplier is not None
-                else rule.multiplier
-            )
-            weighted_score = raw_score * multiplier
+            weighted_score = raw_score * rule.multiplier
             if math.isfinite(weighted_score):
                 calculated[category_column] = round(weighted_score, 10)
 

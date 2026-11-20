@@ -385,7 +385,7 @@ def _load_inputs(
     json_upload: Any, sample_path: str, rubric_upload: Any, rubric_path: str, role_key: str
 ) -> tuple[list[dict[str, Any]], str]:
     candidates: list[dict[str, Any]] = []
-    rubric_text = ""
+    rubric_text = "Local URL extraction" if role_key == "portfolio_links" else ""
     head_sales = role_key == "head_sales"
     include_project_dates = role_key == "fe_orange"
     peeko = role_key in {"peeko", "peeko2"}
@@ -593,7 +593,8 @@ def _show_run_controls(
         if active_rubric_issue:
             st.error(active_rubric_issue)
             st.stop()
-        _require_api_ready(api_key, approved, provider_key)
+        if role_key != "portfolio_links":
+            _require_api_ready(api_key, approved, provider_key)
         if active_run:
             _require_run_provider(active_run, provider_key)
         if not active_run:
@@ -616,7 +617,8 @@ def _show_run_controls(
         if saved_rubric_issue:
             st.error(saved_rubric_issue)
             st.stop()
-        _require_api_ready(api_key, approved, provider_key)
+        if role_key != "portfolio_links":
+            _require_api_ready(api_key, approved, provider_key)
         _require_run_provider(selected_run, provider_key)
         _run_evaluation(selected_run, api_key, parallel_calls, retry_failed=True)
         ran_evaluation = True
@@ -1118,7 +1120,37 @@ def _rows_to_xlsx_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes
     frame = pd.DataFrame(rows, columns=columns)
     from candidate_evaluator import peeko, peeko2
 
-    if columns in (peeko.OUTPUT_COLUMNS, peeko.LEGACY_OUTPUT_COLUMNS, peeko2.OUTPUT_COLUMNS):
+    from candidate_evaluator.url_links import OUTPUT_COLUMNS as URL_COLUMNS
+
+    if columns == URL_COLUMNS:
+        from openpyxl.styles import Alignment
+
+        # One URL per row preserves complete output when a profile has more
+        # links than Excel can store in one summary cell.
+        link_rows = [
+            {"Candidate": row.get("Candidate", ""), "Profile URL": row.get("Profile URL", ""),
+             "Category": column, "URL": url}
+            for row in rows
+            for column in URL_COLUMNS[3:-1]
+            for url in str(row.get(column, "")).splitlines()
+            if url
+        ]
+        summary = frame.map(
+            lambda value: value[:32000] + "\nSee All URLs sheet for the complete list."
+            if isinstance(value, str) and len(value) > 32000 else value
+        )
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            summary.to_excel(writer, index=False, sheet_name="Candidates")
+            pd.DataFrame(link_rows, columns=["Candidate", "Profile URL", "Category", "URL"]).to_excel(
+                writer, index=False, sheet_name="All URLs"
+            )
+            for sheet in writer.book.worksheets:
+                for cells in sheet.iter_rows():
+                    for cell in cells:
+                        cell.alignment = Alignment(wrap_text=True, vertical="top")
+                for column in sheet.columns:
+                    sheet.column_dimensions[column[0].column_letter].width = 45
+    elif columns in (peeko.OUTPUT_COLUMNS, peeko.LEGACY_OUTPUT_COLUMNS, peeko2.OUTPUT_COLUMNS):
         peeko.write_excel(frame, buffer)
     else:
         frame.to_excel(buffer, index=False, engine="openpyxl")

@@ -420,6 +420,14 @@ def role_for_run(run_id: str, override_role_key: Optional[str] = None) -> RolePr
     status = load_status(run_id)
     role_key = override_role_key or status.get("role", DEFAULT_ROLE_KEY)
     role = get_role_profile(role_key, status.get("custom_role_config"))
+    if role_key == "safegold":
+        from .safegold import LEGACY_OUTPUT_COLUMNS, LEGACY_SCORES, LEGACY_TOTAL
+
+        rubric_path = run_dir(run_id) / "rubric.md"
+        if rubric_path.is_file() and LEGACY_TOTAL in rubric_path.read_text(encoding="utf-8"):
+            # Old runs can still be viewed and exported with their original scores.
+            return replace(role, export_columns=LEGACY_OUTPUT_COLUMNS, total_column=LEGACY_TOTAL,
+                           total_max=53, ranking_tiebreaker_columns=LEGACY_SCORES)
     if role_key == "peeko":
         rubric_path = run_dir(run_id) / "rubric.md"
         if rubric_path.is_file():

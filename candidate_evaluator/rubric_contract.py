@@ -4,13 +4,15 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .roles import FE_ORANGE_CAPABILITIES, SAFEGOLD_CAPABILITIES, RoleProfile
-from .safegold import MEDIUM_RULES
+from .roles import (
+    FE_ORANGE_CAPABILITIES, SAFEGOLD_ALLOWED_SCORES, SAFEGOLD_CAPABILITIES, SAFEGOLD_TOTAL, RoleProfile,
+)
+from .safegold import CHANNEL_POINTS
 
 
 def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
     if role.key == "safegold":
-        return _safegold_rubric_issue(rubric_text, role.total_max)
+        return _safegold_rubric_issue(rubric_text)
     if role.key == "fe_orange":
         return _fe_orange_rubric_issue(rubric_text)
     if role.key == "peeko2":
@@ -62,42 +64,46 @@ def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
     return ""
 
 
-def _safegold_rubric_issue(rubric_text: str, total_max: float) -> str:
+def _safegold_rubric_issue(rubric_text: str) -> str:
     text = unicodedata.normalize("NFKC", rubric_text).replace("**", "")
-    capabilities = []
-    channels = []
-    weight_pattern = r"[xX×]\s*(\d+(?:\.\d+)?)"
-    for line in text.splitlines():
-        if not line.strip().startswith("|"):
-            continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 3 and cells[0] in SAFEGOLD_CAPABILITIES:
-            weights = tuple(float(value) for value in re.findall(weight_pattern, cells[1]))
-            capabilities.append((cells[0], weights, cells[2]))
-        if len(cells) == 5 and cells[1] in MEDIUM_RULES:
-            weight = re.fullmatch(weight_pattern, cells[3])
-            channels.append((cells[0], cells[1], float(weight[1]) if weight else None, cells[4]))
-    expected_capabilities = [
-        (name, (maximum / 10,), str(maximum))
-        for name, maximum in SAFEGOLD_CAPABILITIES.items()
-        if name != "Customer Support Medium"
+    tables = {}
+    for block in re.split(r"\n\s*\n", text):
+        rows = [
+            tuple(cell.strip() for cell in line.strip().strip("|").split("|"))
+            for line in block.splitlines() if line.strip().startswith("|")
+        ]
+        if len(rows) > 2:
+            tables.setdefault(rows[0], []).append(rows[2:])
+
+    total = sum(SAFEGOLD_CAPABILITIES.values())
+    capabilities = [(name, str(points)) for name, points in SAFEGOLD_CAPABILITIES.items()]
+    evidence_tables = tables.get(("Evidence", "Points"), [])
+    arabic_tables = tables.get(("Arabic language evidence", "Points"), [])
+    evidence_tiers = [
+        sorted(row[-1] for row in table)
+        for table in [*evidence_tables, *arabic_tables]
     ]
-    expected_capabilities.append((
-        "Customer Support Medium",
-        tuple(weight for weight, _ in MEDIUM_RULES.values()),
-        str(SAFEGOLD_CAPABILITIES["Customer Support Medium"]),
-    ))
-    expected_channels = [
-        (str(priority), label, weight, f"{weight * 10:g}")
-        for priority, (label, (weight, _)) in enumerate(MEDIUM_RULES.items(), start=1)
+    expected_tiers = [
+        sorted(map(str, scores)) for column, scores in SAFEGOLD_ALLOWED_SCORES.items()
+        if column != "Customer Support Channels Score (/10)"
+    ]
+    channel_rows = [
+        (label, str(CHANNEL_POINTS[count]))
+        for label, count in (("4 or more", 4), ("3", 3), ("2", 2), ("1", 1), ("None explicitly established", 0))
     ]
     totals = re.findall(r"maximum\s+score\s*:\s*(\d+(?:\.\d+)?)", text, re.IGNORECASE)
-    if capabilities != expected_capabilities or channels != expected_channels or (
-        not totals or any(float(total) != total_max for total in totals)
+    if (
+        tables.get(("Capability", "Maximum Score")) != [capabilities + [("Total", str(total))]]
+        or tables.get(("Criterion", "Maximum")) != [capabilities + [("Final Score", str(total))]]
+        or tables.get(("Distinct qualifying channels", "Points")) != [channel_rows]
+        or evidence_tiers != expected_tiers
+        or SAFEGOLD_TOTAL not in text
+        or not totals
+        or any(float(value) != total for value in totals)
     ):
         return (
             "This rubric does not match the SafeGold scoring configuration. "
-            "Use the six-capability SafeGold rubric with a maximum of 53 and the configured channel weights."
+            "Use the four-criterion SafeGold rubric with a maximum of 40 and fixed score tiers."
         )
     return ""
 

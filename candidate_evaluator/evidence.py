@@ -57,6 +57,7 @@ def custom_evidence_payload(candidate: dict[str, Any], evidence_sources: list[st
         "Projects": ("Projects", candidate.get("projects") or []),
         "Website": ("Website", candidate.get("website")),
         "Skills": ("Skills", candidate.get("skills") or []),
+        "Languages": ("Languages", candidate.get("languages") or []),
         "Education": ("Education", candidate.get("education") or []),
     }
     for source, (payload_name, value) in direct_fields.items():

@@ -150,7 +150,8 @@ def normalize_candidate(
         "about": _first_nonempty(profile.get("about"), profile.get("summary"), profile.get("bio")),
         "location": _format_location(_first_value(profile.get("location"), specifics.get("location"))),
         "skills": _normalize_skills(
-            _first_list(profile.get("skills"), specifics.get("skills")), profile.get("topSkills")
+            _first_list(profile.get("skills"), specifics.get("skills")),
+            None if safegold else profile.get("topSkills"),
         ),
         "website": _first_website(profile.get("websites")),
         "education": education,
@@ -168,6 +169,10 @@ def normalize_candidate(
     from .url_links import extract_links
 
     candidate["url_entries"] = extract_links(profile)
+    if safegold:
+        candidate["languages"] = _normalize_languages(
+            _first_list(profile.get("languages"), specifics.get("languages"))
+        )
     candidate["source_row"] = build_source_row(candidate)
     return candidate
 
@@ -242,9 +247,9 @@ def candidate_input_issue(
     if role_key == "portfolio_links":
         return ""
     reasons = []
-    if candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial":
+    if role_key != "safegold" and candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial":
         reasons.append("Unipile returned a partial profile; retrieve the complete profile before evaluation")
-    throttled = _relevant_throttled_sections(candidate, evidence_sources)
+    throttled = _relevant_throttled_sections(candidate, evidence_sources) if role_key != "safegold" else []
     if throttled:
         reasons.append(
             "Unipile throttled required profile section(s): " + ", ".join(throttled)
@@ -289,10 +294,10 @@ def candidate_input_issues(
             post_records.append(candidate_id)
         if not candidate.get("candidate_name") or not linkedin_url:
             missing_identity_records.append(candidate_id)
-        if (
-            candidate.get("source_format") == "unipile"
-            and candidate.get("source_visibility") == "partial"
-        ) or _relevant_throttled_sections(candidate, evidence_sources):
+        if role_key != "safegold" and (
+            (candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial")
+            or _relevant_throttled_sections(candidate, evidence_sources)
+        ):
             incomplete_unipile_records.append(candidate_id)
         if evidence_sources is not None and skip_if_no_evidence:
             lacks_evidence = not has_selected_evidence(candidate, evidence_sources) or (
@@ -464,7 +469,7 @@ def _has_normalized_value(value: Any) -> bool:
 
 
 def _normalize_project_technologies(project: dict[str, Any]) -> list[str]:
-    for key in ("technologies", "skills", "techStack"):
+    for key in ("technologies", "skills", "techStack", "tools"):
         value = project.get(key)
         if not value:
             continue
@@ -541,6 +546,23 @@ def _normalize_skills(skills: Any, top_skills: Any) -> list[str]:
             if name and name not in names:
                 names.append(name)
     return names
+
+
+def _normalize_languages(languages: list[Any]) -> list[dict[str, str]]:
+    normalized = []
+    for entry in languages:
+        if isinstance(entry, dict):
+            name = _first_nonempty(_object_name(entry.get("language")), _object_name(entry))
+            proficiency = _object_name(entry.get("proficiency"))
+        else:
+            name, proficiency = _clean(entry), ""
+        if name:
+            language = {"name": name}
+            if proficiency:
+                language["proficiency"] = proficiency
+            if language not in normalized:
+                normalized.append(language)
+    return normalized
 
 
 def _format_date(value: Any) -> str:

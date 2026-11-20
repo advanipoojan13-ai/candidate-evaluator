@@ -387,7 +387,7 @@ def _load_inputs(
     candidates: list[dict[str, Any]] = []
     rubric_text = "Local URL extraction" if role_key == "portfolio_links" else ""
     head_sales = role_key == "head_sales"
-    include_project_dates = role_key in {"fe_orange", "safegold"}
+    include_project_dates = role_key == "fe_orange"
     peeko = role_key in {"peeko", "peeko2"}
     safegold = role_key == "safegold"
     try:

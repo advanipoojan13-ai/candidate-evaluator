@@ -1,65 +1,68 @@
-# LinkedIn Scoring Rubric - SafeGold Customer Support & Operations Executive (UAE)
+# LinkedIn Scoring Rubric — SafeGold Customer Support & Operations Executive (UAE)
 
-**Role:** Customer Support & Operations Executive - SafeGold, Dubai, UAE
+**Role:** Customer Support & Operations Executive — SafeGold, Dubai, UAE  
+**Purpose:** Score and rank pre-filtered LinkedIn profiles.  
+**Maximum Score:** 40 Points  
+**Screening Stage:** Initial LinkedIn Profile Evaluation
 
-**Purpose:** Score and rank pre-filtered LinkedIn profiles.
-
-**Maximum score:** 53 points.
+---
 
 ## Objective
 
-Score six capabilities using three components:
+Evaluate LinkedIn profiles across four criteria:
 
-1. Evidence
-2. Recency
-3. Evidenced Duration
+1. Customer-Facing Experience — 15 Points
+2. Customer Support Channels — 10 Points
+3. Banking & Financial Services Exposure — 10 Points
+4. Arabic Language — 5 Points
 
-For C1-C5 and for each qualifying support channel, the AI returns:
+The objective is to identify candidates with direct customer-facing experience, exposure to multiple customer support channels, familiarity with banking and financial operations, and Arabic language capabilities.
 
-- Evidence Points: 0-4
-- Recency Points: 0-3
-- Evidenced Duration Points: 0-3
+**This is an initial screening rubric, not a final hiring assessment.**
 
-The application selects the support medium, derives the final C6 components, and calculates weighted capability scores, the Final Score, and rank. The AI must not return these mechanical fields.
+Evaluate relevant experience regardless of when it occurred. Recency and duration do not influence scoring.
 
-Missing LinkedIn information receives zero where evidence is required, but must be described as **unverified** or **not stated**. Missing information is not proof that the candidate lacks the capability.
+Missing LinkedIn information should receive zero where evidence is required but must be described as **unverified** or **not stated**, rather than assuming the candidate lacks the capability.
+
+No candidate should be automatically rejected for missing Arabic, banking experience, or incomplete LinkedIn descriptions.
 
 ---
 
 # 1. Global Scoring Rules
 
-1. Use only explicit information from permitted LinkedIn fields.
-2. Do not infer capability from title, seniority, company name, employer reputation, education, or industry.
-3. Do not infer that the candidate personally performed work merely because their team or employer performed it.
-4. Score Evidence, Recency, and Duration independently.
-5. Use the strongest valid evidence source once. Do not stack repeated mentions.
-6. One achievement may support multiple capabilities only when it explicitly demonstrates each capability.
-7. Do not reward keyword repetition or long lists of tools.
-8. If a higher score requires an assumption, use the lower supported score.
-9. Warnings do not change the score.
-10. Do not add undocumented bonuses, penalties, pass scores, or rejection rules.
-11. Candidate experience length and seniority are outside this rubric because the supplied profiles are already pre-filtered for suitable experience.
+1. Evaluate only information explicitly available in permitted LinkedIn fields.
+2. Evidence can appear anywhere in the permitted profile fields, including current and previous positions.
+3. Evaluate relevant experience regardless of when it occurred.
+4. Do not calculate Recency or Duration Points.
+5. Do not infer responsibilities solely from company reputation, industry, seniority, or generic job titles.
+6. Explicitly customer-facing job titles can establish customer-facing experience even when descriptions are missing.
+7. Do not assume candidates personally performed activities simply because their employer offers those services.
+8. Do not reward repeated mentions of the same keyword.
+9. Multiple qualifying customer support channels should be rewarded according to the channel scoring rules.
+10. Banking terminology can receive partial credit, but demonstrated hands-on work should receive higher credit.
+11. Missing information receives zero for the relevant criterion without automatic rejection.
+12. Do not add undocumented bonuses, penalties, rejection rules, or scoring adjustments.
+13. If a higher score requires an assumption, assign the lower supported score.
+14. Candidate experience length and seniority are outside this rubric because profiles are already pre-filtered.
 
 ---
 
-# 2. Fields to Use
+# 2. Permitted LinkedIn Fields
 
-## Allowed scoring fields
+## Allowed Scoring Fields
 
 - Headline
-- About section
+- About / Summary
 - Experience title / position
 - Experience description
-- Experience-level skills or tools attached to a specific role
-- Experience start date
-- Experience end date
-- Current-status indicator
-- Written role duration
+- Experience-level skills
+- Skills section
 - Project name
 - Project description
 - Project tools
+- Languages section
 
-## Identification only
+## Identification Only
 
 - Candidate name
 - LinkedIn profile URL
@@ -68,268 +71,546 @@ Missing LinkedIn information receives zero where evidence is required, but must 
 
 Duplicate experience records must be merged before scoring.
 
----
-
-# 3. Capabilities and Maximum Scores
-
-Each capability receives a raw score out of 10:
-
-> **Raw Capability Score = Evidence + Recency + Evidenced Duration**
-
-| Capability | Multiplier | Maximum |
-|---|---:|---:|
-| Frontline Customer Support | x1.0 | 10 |
-| Issue Resolution, Complaints & Escalations | x1.2 | 12 |
-| KYC, AML/CFT, Disputes & Fraud | x0.8 | 8 |
-| Partner Support, Case Records & Support Tools | x0.8 | 8 |
-| Recurring Issues, Feedback & Support Content | x0.5 | 5 |
-| Customer Support Medium | x1.00 / x0.80 / x0.60 / x0.40 / x0.20 (see Section 7.6) | 10 |
-| **Total** |  | **53** |
-
-Issue resolution carries the most weight. Frontline support and support medium each contribute up to 10 points.
+Information may be considered regardless of where it appears within the permitted scoring fields.
 
 ---
 
-# 4. Evidence Points - Maximum 4 per Capability
+# 3. Scoring Summary
 
-Select exactly one Evidence score for each capability using the strongest valid source.
-
-| Strongest supported evidence | Points |
+| Capability | Maximum Score |
 |---|---:|
-| Experience description explicitly shows the candidate personally performed qualifying work in the capability | **4** |
-| About section or Headline explicitly names the tool or capability | **3** |
-| Role-specific tool/capability list inside an experience, capability-specific experience title, or detailed project delivered to real users explicitly identifies the capability | **2** |
-| Experience-level skill/tool attached to a role, or an undetailed project, explicitly names the capability | **1** |
-| No permitted evidence | **0** |
+| Customer-Facing Experience | 15 |
+| Customer Support Channels | 10 |
+| Banking & Financial Services Exposure | 10 |
+| Arabic Language | 5 |
+| **Total** | **40** |
 
-## Evidence rules
+The AI should return individual criterion scores and supporting evidence.
 
-- Do not add Evidence Points from multiple sources.
-- An experience title can receive 2 Evidence Points only when it specifically names the tool or capability. A generic executive, operations, leadership, or seniority title does not qualify.
-- Headline and About provide Evidence Points only. They cannot by themselves establish hands-on support work, case ownership, compliance decisions, or customer outcomes.
-- A detailed project delivered to real customers or partners can provide strong evidence, but an undated project receives no Recency or Duration.
-- A project counts as delivered only when the profile explicitly describes use by real customers, partners, or a customer support team.
-- A simulation, coursework exercise, draft, or demo alone does not establish delivery.
+The application calculates the Final Score and ranking.
 
 ---
 
-# 5. Recency Points - Maximum 3 per Capability
+# 4. Customer-Facing Experience — Maximum 15 Points
 
-For each capability independently, find the most recent dated experience containing valid evidence.
+## Objective
 
-| Most recent qualifying use | Points |
+Identify candidates who have personally interacted with external customers as part of their professional responsibilities.
+
+Prioritise customer support and service responsibilities over purely backend, administrative, or operational roles.
+
+Experience from any previous or current role qualifies equally.
+
+## 4.1 Scoring
+
+| Evidence | Points |
 |---|---:|
-| Current or ended within the last 12 months | **3** |
-| Ended 13-36 months ago | **2** |
-| Ended 37-60 months ago | **1** |
-| Ended more than 60 months ago | **0** |
-| Evidence is undated | **0** |
+| Experience description explicitly confirms direct customer interaction, including handling queries, complaints, support requests, and issue resolution | 15 |
+| Explicitly customer-facing job title such as Customer Support Executive, Customer Service Representative, Customer Care Agent, or Customer Support Specialist, without detailed responsibilities | 12 |
+| Customer-facing responsibilities demonstrated within another role, such as banking operations, onboarding, or relationship management | 10 |
+| Headline, About, or Skills explicitly mention customer support or customer service without clear evidence of direct customer interaction | 5 |
+| No qualifying evidence | 0 |
 
-Recency may come from a capability-specific experience title, actual-use experience description, role-specific tool/capability list, or experience-level skill/tag. Headline, About, and undated Projects receive zero Recency Points.
+Use the highest supported evidence level once. Do not add points for multiple mentions.
 
-Do not use the candidate's latest job date unless that job contains evidence of the capability being scored.
+### Approved Customer-Facing Keywords
+
+**Strong indicators:**
+
+- Customer Support
+- Customer Service
+- Customer Care
+- Customer Experience Executive
+- Customer Support Specialist
+- Customer Service Representative
+- Customer Care Executive
+- Customer Success — when support/service responsibilities are stated
+- Customer Complaints
+- Customer Queries
+- Customer Grievances
+- Customer Escalations
+- Customer Assistance
+- Inbound Customer Support
+- Outbound Customer Support — service-related
+- Client Support
+- Client Servicing
+- Customer Helpdesk
+- Customer Onboarding Support
+- Contact Centre Customer Service
+- Call Centre Customer Service
+
+**Supporting activity keywords:**
+
+- Responded to customer queries
+- Handled customer complaints
+- Assisted customers
+- Resolved customer issues
+- Customer interaction
+- Customer communication
+- Customer query management
+- Complaint handling
+- Customer grievance redressal
+- Customer issue resolution
+- Customer support tickets
+- Customer service operations
+
+Equivalent wording qualifies when it clearly establishes external customer-facing work.
+
+### Do Not Consider as Customer-Facing Evidence
+
+- Backend Operations
+- Data Entry
+- Documentation Processing
+- Reconciliation
+- Internal Operations
+- Internal Helpdesk
+- Administrative Support
+- Reporting / MIS
+- Process Automation
+- Quality Assurance without customer interaction
+- Internal Stakeholder Management
+- Sales Operations
+- Lead Generation
+- Business Development
+- Outbound Sales
+- Telemarketing
+- Social Media Marketing
+- Content Management
+- Generic Operations Executive
+- Generic Relationship Manager without stated customer service responsibilities
+- Generic Contact Centre Agent without stated customer service responsibilities
+
+**Important:** These titles do not automatically disqualify a candidate. If their description explicitly demonstrates customer-facing support, award the appropriate points.
 
 ---
 
-# 6. Evidenced Duration Points - Maximum 3 per Capability
+# 5. Customer Support Channels — Maximum 10 Points
 
-Duration measures how long dated professional experience supports the capability.
+## Objective
 
-| Supported non-overlapping duration | Points |
+Identify candidates who have handled customer queries across multiple communication channels.
+
+Count channels mentioned across any permitted LinkedIn field or previous role.
+
+A channel qualifies only when it is explicitly connected to customer support or customer service.
+
+## 5.1 Approved Channels
+
+### Channel 1 — Phone / Calls
+
+Qualifying keywords:
+
+- Phone Support
+- Voice Support
+- Inbound Calls
+- Outbound Customer Service Calls
+- Customer Service Calls
+- Telephonic Support
+- Call Handling
+- Customer Helpline
+- Contact Centre Voice Support
+- Customer Service Call Centre
+- Customer Callbacks
+
+Do not count:
+
+- Sales Calls
+- Cold Calling
+- Lead Generation Calls
+- Recruitment Calls
+- Telemarketing
+- Internal Team Calls
+- Generic Voice Process without customer service context
+
+### Channel 2 — Live Chat / Messaging
+
+Qualifying keywords:
+
+- Live Chat Support
+- Chat Support
+- In-App Chat
+- Website Chat Support
+- WhatsApp Customer Support
+- WhatsApp Business Support
+- Customer Messaging
+- Chat-Based Customer Service
+- Instant Messaging Support
+
+Do not count:
+
+- Internal Team Chat
+- WhatsApp Marketing
+- WhatsApp Lead Generation
+- Personal Messaging
+- Generic Chat Tools without customer service context
+
+### Channel 3 — Email
+
+Qualifying keywords:
+
+- Email Support
+- Email-Based Customer Service
+- Customer Query Emails
+- Customer Complaint Emails
+- Email Ticket Resolution
+- Customer Service Mailbox
+- Email Correspondence with Customers
+
+Do not count:
+
+- Email Marketing
+- Cold Emailing
+- Sales Outreach
+- Internal Email Communication
+- Generic Email Management
+- Personal Email Address
+
+### Channel 4 — Social Media Customer Support
+
+Qualifying keywords:
+
+- Instagram Customer Support
+- Instagram DM Support
+- Facebook Customer Support
+- Social Media Customer Service
+- Social Media Complaint Handling
+- Twitter / X Customer Support
+- Social Media Query Resolution
+- Social Media Direct Message Support
+- Customer Support through Social Media
+
+Do not count:
+
+- Social Media Marketing
+- Social Media Campaigns
+- Content Creation
+- Community Growth
+- Influencer Marketing
+- Social Media Publishing
+- Paid Advertising
+- Generic Social Media Management without customer service responsibilities
+
+### Channel 5 — Other Direct Customer Support Channels
+
+Qualifying examples:
+
+- SMS Customer Support
+- Video-Based Customer Support
+- Customer Support through an explicitly named digital communication platform not covered above
+- In-Person Customer Service / Branch Customer Service
+- Walk-In Customer Support
+- Customer Service Counter
+
+Count this as one additional channel category, regardless of how many qualifying methods are mentioned within it.
+
+## 5.2 Channel Scoring
+
+| Distinct qualifying channels | Points |
 |---|---:|
-| Three years or more | **3** |
-| Two years to under three years | **2** |
-| One year to under two years | **1** |
-| More than zero but under one year, or duration cannot be reliably established | **0** |
-| None | **0** |
+| 4 or more | 10 |
+| 3 | 8 |
+| 2 | 6 |
+| 1 | 4 |
+| None explicitly established | 0 |
 
-## Duration-source caps
+### Channel Scoring Rules
 
-- Experience description showing actual use or a capability-specific experience title: maximum 3
-- Role-specific tool/capability list: maximum 2
-- Experience-level skill/tag: maximum 1
-- Headline, About, generic title, or undated Project: 0
+1. Count each channel category only once.
+2. Phone and calls are the same channel.
+3. Live chat and WhatsApp are the same channel.
+4. Instagram and Facebook support are the same social media channel.
+5. Multiple tools within one channel do not increase the channel count.
+6. Channels may come from different roles or different permitted LinkedIn sections.
+7. A channel does not qualify merely because the candidate used the platform for sales, marketing, or internal communication.
+8. Do not adjust scores based on when or how long the candidate used a channel.
 
-## Duration rules
+**Examples:**
 
-1. Use the full role duration only when the capability is described as an ongoing responsibility or sustained use.
-2. A one-time achievement such as closing a specific case, launching a process, or writing an FAQ does not receive the full role duration unless a time period or continuing responsibility is explicit.
-3. Combine qualifying non-overlapping periods across roles.
-4. Count overlapping time once per capability.
-5. A serious project delivered to real users receives zero Duration Points unless its time period is explicitly available.
-
----
-
-# 7. Approved Capability Evidence
-
-Use the shared Evidence, Recency, and Evidenced Duration rules in Sections 4–6 for every capability. The lists below determine which work qualifies.
-
-## 7.1 Frontline Customer Support - Maximum 10
-
-### Count
-
-- Answering external customers' questions about using a product or service, accessing an account, checking a transaction or order status, or understanding a service policy. Example “Answered customers' questions about withdrawal status and account access.”
-- Guiding external customers through a service step, such as resetting access or submitting documents.
-- An explicitly frontline support title such as Customer Support Executive, Customer Service Representative, or Customer Care Agent. A named channel is optional here. Evaluate channel priority in Section 7.6.
-
-### Do not count
-
-- Outbound sales, lead generation, or relationship management with no stated customer service duty.
-- Internal employee help-desk work, social media publishing, or back-office data processing with no customer contact.
-- “Contact Centre Agent,” “Executive,” or “Operations Associate” without a stated customer service function. A channel name or “omnichannel” alone does not establish that function.
-
-Set **Frontline Customer Support Unverified = Yes** unless an Experience description explicitly confirms direct frontline work or a detailed project confirms the candidate personally supported real customers.
-
-## 7.2 Issue Resolution, Complaints & Escalations - Maximum 12
-
-### Count
-
-- Investigating, troubleshooting, or resolving a specific type of customer problem, such as a failed payment, delayed withdrawal, blocked account, incorrect charge, or missing refund.
-- Taking action on an escalation by coordinating a fix, providing case-specific progress updates, or confirming resolution. Example “Investigated delayed withdrawals, coordinated the fix, and confirmed resolution with customers.”
-- A specific complaints, resolution, or escalations title or role responsibility, such as Customer Escalations Specialist. Report investigation, resolution, or closure only when the corresponding action is stated.
-
-### Do not count
-
-- Answering routine questions, processing a standard refund without investigating a problem, or posting a general service update.
-- Logging, forwarding, or transferring a complaint without stated investigation, follow-up, or ownership. Case logging can qualify under Section 7.4.
-- A generic Customer Support title, a standalone complaint-volume figure, or a claim such as “strong problem-solving skills” with no qualifying work.
-
-Set **Issue Resolution, Complaints & Escalations Unverified = Yes** when no permitted description explicitly supports the candidate personally investigating, resolving, or managing a customer issue or escalation.
-
-## 7.3 KYC, AML/CFT, Disputes & Fraud - Maximum 8
-
-### Count
-
-- Collecting identity or address documents explicitly for Know Your Customer (KYC) checks, checking those documents against KYC requirements, or recording a KYC decision the candidate was authorised to make.
-- Performing or reviewing anti-money laundering or counter-terrorist financing (AML/CFT) checks, such as screening a customer or reviewing a flagged transaction.
-- Gathering case details for, investigating, or processing a financial transaction dispute or chargeback. Identifying or escalating suspected fraud also qualifies when the fraud casework is explicit.
-- Any one qualifying workstream. Report exactly what the candidate did and record a UAE regulatory connection only when stated.
-
-### Do not count
-
-- Generic onboarding, collecting contact details, profile edits, routine refunds, or unspecified “compliance” without a link to a qualifying workstream.
-- Training, coursework, or certification alone as professional casework.
-- Document collection as proof of verification or approval. Routing a fraud report does not establish that the candidate investigated or decided the case.
-
-## 7.4 Partner Support, Case Records & Support Tools - Maximum 8
-
-### Count
-
-- Answering a distribution partner's question about a customer's account, case, or transaction, or resolving that issue for the partner.
-- Creating, categorising, updating, or closing customer support tickets, recording complaint outcomes, or documenting a case handoff. Example “Updated Zendesk tickets with case notes and resolution status.”
-- Freshdesk, Zendesk, or another CRM or ticketing tool when the permitted source explicitly ties it to customer support cases.
-
-### Do not count
-
-- Partner sales, commercial relationship management, or account planning with no customer or transaction support.
-- A bare CRM keyword, CRM administration, sales pipeline updates, or generic data entry with no customer support case context.
-- Case logging alone as issue investigation or resolution. Use Section 7.2 only when the candidate also performed a qualifying action under that criterion.
-
-## 7.5 Recurring Issues, Feedback & Support Content - Maximum 5
-
-### Count
-
-- Tracking repeated incidents of a named issue or identifying a cause. Example “Tracked recurring wallet login failures and shared the findings with Product.”
-- Sending Product, Operations, or another responsible team a specific customer complaint pattern or actionable feedback, or implementing a fix for a recurring support issue.
-- Writing, updating, or translating a customer support FAQ, help article, call script, or response template. Record Arabic translation only when the language is named.
-
-### Do not count
-
-- Resolving one ticket, sending routine case replies, or passing on feedback without a specific issue or actionable detail.
-- Generic “process improvement,” “feedback,” or “content creation” without a named support issue or support resource.
-- Marketing copy or social posts created for promotion. Support content translated into Arabic does not establish native or spoken proficiency.
+- Phone + Email = 6 points
+- Phone + Chat + Email = 8 points
+- Phone + Chat + Email + Instagram = 10 points
+- WhatsApp + Live Chat = 4 points
+- Instagram Marketing + Email Marketing = 0 points
 
 ---
 
-## 7.6 Customer Support Medium - Maximum 10
+# 6. Banking & Financial Services Exposure — Maximum 10 Points
 
-### Count
+## Objective
 
-| Priority | Medium | Qualifying examples | Multiplier | Maximum |
-|---:|---|---|---:|---:|
-| 1 | Calls + Chat | Customer support over phone and via live chat, in-app chat, or WhatsApp. Both channels must be explicit. | x1.00 | 10 |
-| 2 | Calls | Customer support over phone, inbound service calls, or outbound service callbacks | x0.80 | 8 |
-| 3 | Chat | Live chat, in-app chat, or WhatsApp used for customer support | x0.60 | 6 |
-| 4 | Email | Responding to customer queries or cases by email | x0.40 | 4 |
-| 5 | Social Media | Responding to customer queries or complaints through social platform comments or direct messages | x0.20 | 2 |
+Identify candidates familiar with banking, fintech, financial transactions, financial products, compliance processes, and customer-facing financial operations.
 
-### Do not count
+The objective is to identify relevant domain exposure, not to require advanced banking expertise.
 
-- A bare channel name, “omnichannel,” “inbound,” “voice,” or “contact centre” without explicit customer support use. A phone number or email address on the profile is contact information.
-- Sales calls, marketing emails, internal team chat, or social media publishing without customer service work.
+Experience from any previous or current role qualifies equally.
 
-### Rules
+## 6.1 Scoring
 
-1. Select the first qualifying row in the table. Calls and Chat can be evidenced in the same role or in different roles. If both qualify, select **Calls + Chat** even if other channels also qualify.
-2. For **Calls + Chat**, apply Sections 4–6 to each channel independently. The application uses the lower of the two channel scores for each component.
-3. For an individual channel, apply Sections 4–6 using evidence and dates for that channel only. If Calls and Email qualify, select **Calls**. If Chat and Email qualify, select **Chat**.
-4. Return separate components for Calls, Chat, Email, and Social Media in the response schema. Use null for a channel with no qualifying evidence. The application uses the exact label and multiplier of the first qualifying row. If no row qualifies, the application leaves the label blank and assigns zero to all components.
+| Evidence | Points |
+|---|---:|
+| Experience description explicitly demonstrates personal execution of banking, financial operations, compliance, transaction, or financial customer support work | 10 |
+| About or Headline explicitly describes relevant banking/financial responsibilities or financial operations experience | 8 |
+| Role title, role-specific skills, or project description explicitly identifies a qualifying banking/financial capability | 6 |
+| Generic banking/financial terminology appears in permitted skills or profile text without demonstrated responsibility | 3 |
+| No qualifying evidence | 0 |
+
+Use the highest supported evidence level once.
+
+Do not increase scores based on the number of financial keywords, repeated mentions, or years of experience.
+
+## 6.2 Approved Banking & Financial Keywords
+
+### A. KYC, AML & Compliance
+
+- KYC
+- Know Your Customer
+- eKYC
+- Video KYC
+- Customer Due Diligence
+- CDD
+- Enhanced Due Diligence
+- EDD
+- AML
+- Anti-Money Laundering
+- CFT
+- Counter-Terrorist Financing
+- Transaction Monitoring
+- Sanctions Screening
+- Fraud Detection
+- Fraud Prevention
+- Fraud Investigation
+- Identity Verification
+- Document Verification — financial/KYC context
+- Regulatory Compliance — financial context
+
+### B. Banking Operations
+
+- Banking Operations
+- Retail Banking
+- Digital Banking
+- Core Banking
+- Branch Banking Operations
+- Account Opening
+- Bank Account Servicing
+- Account Maintenance
+- Account Verification
+- Banking Customer Support
+- Banking Customer Service
+- Financial Operations
+- Financial Services Operations
+- Payment Operations
+- Transaction Processing
+- Transaction Reconciliation
+- Settlement Operations
+- Remittance Operations
+- Fund Transfers
+- Payment Processing
+- Payment Failures
+- Refund Processing — financial context
+
+### C. Lending & Credit
+
+- Loan Disbursal
+- Loan Processing
+- Loan Servicing
+- Loan Operations
+- Credit Operations
+- Loan Repayment
+- EMI
+- Credit Assessment
+- Loan Documentation
+- Loan Customer Support
+- Loan Account Management
+- Personal Loans
+- Business Loans
+- Credit Cards
+- Debit Cards
+- Card Disputes
+
+### D. Investments & Wealth
+
+- Investments
+- Investment Operations
+- Investment Account Servicing
+- Wealth Management Operations
+- Mutual Funds
+- Digital Gold
+- Gold Investments
+- Securities
+- Brokerage Operations
+- Trading Account Support
+- Portfolio Servicing
+- Redemption Processing
+- Investment Transactions
+- Financial Products
+
+### E. Disputes, Fraud & Transaction Issues
+
+- Transaction Disputes
+- Payment Disputes
+- Chargebacks
+- Fraud Cases
+- Failed Transactions
+- Transaction Investigation
+- Payment Reconciliation
+- Disputed Transactions
+- Account Freezing
+- Account Blocking
+- Payment Escalations
+- Financial Complaint Resolution
+
+## 6.3 What Should Not Count
+
+Do not award banking/financial exposure points for:
+
+- Working at a bank or fintech company without any stated qualifying responsibilities
+- Generic customer support with no financial context
+- Generic operations experience
+- Generic data entry
+- Generic documentation work
+- Generic customer onboarding without financial/KYC context
+- Generic compliance without a financial connection
+- Generic reconciliation without a financial connection
+- Sales of unrelated products
+- Generic CRM experience
+- Generic account management
+- Generic business development
+- Personal investment interests
+- Personal trading or cryptocurrency interests
+- Finance-related education alone
+- Certifications without demonstrated professional experience
+
+### Important Distinctions
+
+- Collecting KYC documents does not establish KYC approval authority.
+- Processing a standard refund does not establish dispute investigation.
+- Escalating a fraud complaint does not establish fraud investigation.
+- Working for a bank does not automatically establish banking operations experience.
+- Mentioning AML in skills does not establish hands-on AML casework.
+- Customer service for a financial product qualifies as financial exposure when the financial context is explicit.
+
+Any one qualifying banking or financial workstream is sufficient. Do not require candidates to demonstrate every category.
 
 ---
 
-# 8. Date Normalisation
+# 7. Arabic Language — Maximum 5 Points
 
-1. Use stated month/year dates when available.
-2. For Present roles, use the evaluation date as the end date.
-3. A clear written duration may be used when dates are incomplete.
-4. If only years are available:
-   - Same start and end year: assign six months.
-   - Later end year: estimate `12 x (end year - start year - 1) + 8 months`.
-5. Do not create false month-level precision.
-6. Count overlapping qualifying time once per capability.
-7. For contradictory, impossible, or future-dated records, use only supportable duration and set **Date-Quality Warning = Yes**.
+## Objective
+
+Identify candidates whose LinkedIn profiles explicitly mention Arabic language proficiency.
+
+Arabic is important for the role, but absence of Arabic from LinkedIn must not trigger automatic rejection.
+
+## 7.1 Scoring
+
+| Arabic language evidence | Points |
+|---|---:|
+| Arabic explicitly listed as Native, Bilingual, Fluent, Full Professional, or Professional Working Proficiency | 5 |
+| Arabic explicitly mentioned without a proficiency level | 3 |
+| Arabic explicitly listed at Basic, Elementary, or Limited Working Proficiency | 2 |
+| Arabic not mentioned | 0 |
+
+## 7.2 Approved Keywords
+
+- Arabic
+- Arabic Language
+- Arabic Speaking
+- Arabic Speaker
+- Arabic Communication
+- Fluent Arabic
+- Native Arabic
+- Bilingual Arabic
+- Professional Arabic
+- Arabic Customer Support
+- Arabic Customer Service
+- Arabic Call Centre
+- Arabic Written Communication
+- Arabic Verbal Communication
+- اللغة العربية
+
+## 7.3 Do Not Infer Arabic From
+
+- Arabic-sounding names
+- Nationality
+- UAE location
+- Dubai work experience
+- Middle Eastern employer
+- Arabic-speaking colleagues
+- University location
+- Employer's customer geography
+- Work experience in Saudi Arabia, Qatar, Oman, Bahrain, Kuwait, or UAE without explicit language evidence
+
+### Special Rules
+
+1. Arabic language evidence can appear anywhere in the permitted LinkedIn fields.
+2. Arabic does not require dated professional experience.
+3. Arabic translation work establishes Arabic-related exposure but does not automatically establish fluent spoken proficiency.
+4. If Arabic is not mentioned, award zero and flag **Arabic Unverified = Yes**.
+5. Candidates scoring zero in Arabic remain eligible for ranking.
 
 ---
 
-# 9. Calculation
+# 8. Final Score Calculation
 
-For each capability, Python calculates:
-
-> **Weighted Capability Score = (Evidence + Recency + Duration) x multiplier**
-
-For Customer Support Medium, use the multiplier for the selected label in Section 7.6. If the selected label is blank, the criterion scores zero.
+The AI returns the four criterion scores.
 
 Python calculates:
 
-> **Final Score = sum of all six weighted capability scores**
+**Final Score = Customer-Facing Experience + Customer Support Channels + Banking & Financial Services Exposure + Arabic Language**
 
-Maximum: **53**.
+| Criterion | Maximum |
+|---|---:|
+| Customer-Facing Experience | 15 |
+| Customer Support Channels | 10 |
+| Banking & Financial Services Exposure | 10 |
+| Arabic Language | 5 |
+| **Final Score** | **40** |
 
-Use full precision internally. Display scores to one decimal place when necessary. Do not apply undocumented adjustments.
+Do not apply recency, duration, experience-length, or seniority adjustments.
 
----
-
-# 10. Non-Scoring Warnings
-
-Return `Yes` or `No` for:
-
-1. **Frontline Customer Support Unverified**
-2. **Issue Resolution, Complaints & Escalations Unverified**
-3. **Date-Quality Warning**
-
-Warnings do not alter scores. Always describe missing information as unverified or not stated.
+Do not apply undocumented adjustments.
 
 ---
 
-# 11. Ranking
+# 9. Non-Scoring Warnings
+
+Return Yes or No for the following:
+
+### 9.1 Arabic Unverified
+
+Yes when Arabic is not explicitly mentioned in permitted LinkedIn fields.
+
+No when Arabic is explicitly mentioned, regardless of proficiency level.
+
+### 9.2 Customer-Facing Experience Unverified
+
+Yes when no qualifying direct customer-facing experience can be confirmed from a role title, experience description, or sufficiently detailed project.
+
+No when qualifying customer-facing experience is confirmed.
+
+A candidate may receive partial points from the Headline, About, or Skills section while this warning remains Yes.
+
+**Warnings do not alter the score or automatically reject candidates.**
+
+---
+
+# 10. Ranking
 
 Rank candidates by Final Score from highest to lowest.
 
-For equal scores, use:
+For equal scores, apply these tie-breakers in order:
 
-1. Higher Frontline Customer Support score
-2. Higher Issue Resolution, Complaints & Escalations score
-3. Higher KYC, AML/CFT, Disputes & Fraud score
-4. Higher Partner Support, Case Records & Support Tools score
-5. Higher Recurring Issues, Feedback & Support Content score
-6. Higher Customer Support Medium score
-7. Candidate name alphabetically
+1. Higher Customer-Facing Experience Score
+2. Higher Customer Support Channels Score
+3. Higher Banking & Financial Services Exposure Score
+4. Higher Arabic Language Score
+5. Candidate name alphabetically
 
-Tie-breakers affect rank only.
+Tie-breakers affect ranking only.
 
 ---
 
-# 12. Final Output Schema
+# 11. Final Output Schema
 
 Export exactly these columns:
 
@@ -338,53 +619,101 @@ Export exactly these columns:
 3. Profile URL
 4. Current Company
 5. Current Title
-6. Frontline Customer Support Score (/10)
-7. Issue Resolution, Complaints & Escalations Score (/12)
-8. KYC, AML/CFT, Disputes & Fraud Score (/8)
-9. Partner Support, Case Records & Support Tools Score (/8)
-10. Recurring Issues, Feedback & Support Content Score (/5)
-11. Customer Support Medium Score (/10)
-12. Final Score (/53)
-13. Selected Customer Support Medium
-14. Frontline Customer Support Unverified
-15. Issue Resolution, Complaints & Escalations Unverified
-16. Date-Quality Warning
-17. Strongest Evidence
-18. Missing or Unclear Information
-19. Score Rationale
+6. Customer-Facing Experience Score (/15)
+7. Customer Support Channels Score (/10)
+8. Banking & Financial Services Exposure Score (/10)
+9. Arabic Language Score (/5)
+10. Final Score (/40)
+11. Identified Customer Support Channels
+12. Arabic Proficiency Identified
+13. Arabic Unverified
+14. Customer-Facing Experience Unverified
+15. Strongest Evidence
+16. Missing or Unclear Information
+17. Score Rationale
 
-The evaluation stores 18 internal component-point fields, including the three C6 components derived by Python from the channel evidence. Component points are not exported.
+The AI returns the four individual criterion scores and supporting evidence. Python calculates Final Score and Rank Number.
 
 ## Strongest Evidence
 
-- Maximum three short points separated by ` | `.
-- Identify the role/project and concrete fact.
-- Prioritize frontline support and named channels, complaint or escalation actions, and relevant KYC, dispute, or fraud casework.
-- Do not repeat the rationale.
+Maximum three short points separated by ` | `.
+
+Prioritise:
+
+1. Direct customer-facing responsibilities.
+2. Explicit customer support channels.
+3. Banking/financial workstreams and Arabic proficiency.
+
+Identify the role and concrete evidence wherever possible.
+
+Do not repeat the score rationale.
 
 ## Missing or Unclear Information
 
-State the most important uncertainties neutrally, especially the support medium when none is named, escalation ownership, and dates. Flag native Arabic and fluent spoken and written English as unverified if the permitted profile text does not state the required proficiency. Do not infer language proficiency from the candidate’s name or location.
+State the most important uncertainties neutrally.
+
+Examples:
+
+- Arabic proficiency not stated
+- Customer support channels not specified
+- Direct customer-facing responsibilities unverified
+- Banking responsibilities not clearly described
+- Customer-facing work mentioned without specific responsibilities
+
+Do not treat missing information as proof of absence.
 
 ## Score Rationale
 
-Maximum 50 words. Explain the strongest supported capabilities and most important uncertainty without repeating every score.
+Maximum 50 words.
+
+Explain the candidate's strongest supported capabilities and the most important missing information.
+
+Do not repeat every individual score.
 
 ---
 
-# 13. Deterministic Edge Rules
+# 12. Deterministic Edge Rules
 
-- Repeated mentions do not increase Evidence Points.
-- Multiple tools or workstreams within a capability still produce one score. For Customer Support Medium, score only the first qualifying row in Section 7.6.
-- A generic Customer Support title does not prove a channel, issue resolution, or regulatory casework.
-- Standard refunds do not prove payment dispute, fraud, or AML/CFT experience.
-- Collecting KYC documents does not prove that the candidate approved or verified the documents.
-- A CRM tool name alone does not prove hands-on case management.
-- Social media publishing does not prove customer support through social media.
-- A simulation or draft support project does not prove support of real customers. A detailed real-user project earns no Recency or Duration unless dated.
-- Title alone does not prove hands-on support activity or resolution ownership.
-- Team outcomes do not automatically prove personal work.
-- Do not score candidate experience length or generate a seniority warning.
-- Missing evidence produces zero for the relevant component and an unverified warning where defined.
-- Duplicate roles do not add repeated evidence or duration.
-- Overlapping duration is counted once per capability.
+1. Repeated keywords do not increase points.
+2. Use the strongest qualifying evidence once per criterion.
+3. Customer-facing job titles can establish customer-facing evidence but do not automatically establish support channels.
+4. Generic operations titles do not establish customer-facing experience.
+5. Direct customer support responsibilities in operations roles qualify.
+6. Customer support channels may be identified across different jobs.
+7. Different platforms within the same channel category count as one channel.
+8. Phone and email are two channels; phone and inbound calls are one.
+9. WhatsApp and live chat count as one channel category.
+10. Instagram and Facebook customer support count as one social media category.
+11. Sales calls do not qualify as phone-based customer support.
+12. Marketing emails do not qualify as email customer support.
+13. Social media publishing does not qualify as social media customer support.
+14. Banking keywords receive partial credit when explicit, even if hands-on responsibility is not demonstrated.
+15. Banking company employment alone does not establish banking exposure.
+16. Generic customer service does not automatically establish financial services experience.
+17. Financial customer service qualifies when the financial product or transaction context is explicit.
+18. KYC document collection does not prove KYC approval.
+19. Generic refunds do not prove payment dispute investigation.
+20. Arabic must be explicitly stated; never infer it from geography, name, or employer.
+21. Missing Arabic does not automatically reject a candidate.
+22. Experience from any current or previous role qualifies equally.
+23. Do not evaluate recency or duration.
+24. Skills and keywords alone do not establish hands-on professional experience.
+25. Duplicate roles must not increase scores.
+26. Missing evidence receives zero and should be described as unverified.
+27. Warnings never change the score.
+28. Do not generate rejection decisions, pass/fail outcomes, or additional eligibility checks.
+29. The AI must not calculate the Final Score or Rank Number; Python performs these calculations.
+
+---
+
+# 13. Final Screening Principle
+
+**Prioritise candidates who have directly supported customers, handled multiple customer support channels, and demonstrated familiarity with banking or financial operations.**
+
+Arabic proficiency is an important additional advantage and must be explicitly captured.
+
+Experience from any point in the candidate's career should be considered equally, without recency or duration adjustments.
+
+LinkedIn profiles are frequently incomplete. The evaluator should identify relevant candidates without applying unnecessarily restrictive assumptions.
+
+**The purpose is to remove clearly irrelevant profiles while retaining potentially suitable candidates for further screening.**

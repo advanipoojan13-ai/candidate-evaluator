@@ -1008,6 +1008,24 @@ DEFAULT_CUSTOM_ROLE_CONFIG: dict[str, Any] = {
 }
 
 
+from .url_links import OUTPUT_COLUMNS as URL_OUTPUT_COLUMNS
+
+ROLE_PROFILES["portfolio_links"] = RoleProfile(
+    key="portfolio_links", label="Portfolio & Website Links",
+    role_name="Portfolio & Website Links",
+    grading_columns=URL_OUTPUT_COLUMNS,
+    category_scores=OrderedDict([("Link Found", 1)]),
+    allowed_scores={"Link Found": {0, 1}},
+    total_column="Link Found", total_max=1,
+    outcome_column="", outcome_bands=[], evidence_confidence_values=[],
+    system_prompt="", instructions=[],
+    internal_role_flag_name="links_found",
+    internal_role_evidence_name="url_entries",
+    export_columns=URL_OUTPUT_COLUMNS, evidence_sources=[],
+    skip_if_no_evidence=False,
+)
+
+
 def role_options() -> dict[str, str]:
     return {
         **{profile.label: profile.key for profile in ROLE_PROFILES.values()},

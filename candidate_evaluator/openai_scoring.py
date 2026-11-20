@@ -80,6 +80,12 @@ def evaluate_candidates(
 
     provider = get_provider(provider_key)
     role = role_profile or get_role_profile(role_key)
+    if role.key == "portfolio_links":
+        from .url_links import evaluate
+        return BatchEvaluationResults(
+            [(evaluate(candidate), {"method": "local_url_extraction"}) for candidate in candidates],
+            usage={},
+        )
     rubric_issue = rubric_input_issue(rubric_text, role)
     if rubric_issue:
         raise ValueError(rubric_issue)

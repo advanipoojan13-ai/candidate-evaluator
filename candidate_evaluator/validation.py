@@ -54,6 +54,12 @@ def expected_outcome(total_score: float, role: RoleProfile) -> str:
 
 def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "design") -> list[str]:
     role = _resolve_role(role_or_key)
+    if role.key == "portfolio_links":
+        missing = [column for column in role.output_columns if column not in row]
+        errors = [f"Missing required column: {column}" for column in missing]
+        if row.get("Link Found") not in (0, 1):
+            errors.append("Link Found must be 0 or 1.")
+        return errors
     errors: list[str] = []
     missing = [column for column in role.output_columns if column not in row]
     if missing:
@@ -173,6 +179,9 @@ def apply_calculated_fields(
 ) -> dict[str, Any]:
     """Add fields that are more reliable and cheaper to calculate in Python."""
     role = _resolve_role(role_or_key)
+    if role.key == "portfolio_links":
+        from .url_links import evaluate
+        return evaluate(candidate)
     if role.key in {"peeko", "peeko2"}:
         from . import peeko, peeko2
 

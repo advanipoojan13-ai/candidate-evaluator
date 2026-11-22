@@ -168,8 +168,6 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
         + (role.ranking_tiebreaker_columns or [])
     )
     for column in numeric_columns:
-        if role.key == safegold_marketing.ROLE_KEY and (fixed[column] is None or column == role.total_column):
-            continue
         if fixed[column] != "":
             errors: list[str] = []
             integer_only = column in role.component_score_maxima or not role.numeric_scores
@@ -212,6 +210,12 @@ def apply_calculated_fields(
         calculated[safegold_marketing.AUDIT] = safegold_marketing.assessed_audit(
             calculated, candidate.get("marketing_source_text", {}),
         )
+        if not str(calculated.get(safegold_marketing.NOTES) or "").strip():
+            calculated[safegold_marketing.NOTES] = " | ".join(
+                f"{name}: {calculated[safegold_marketing.AUDIT][criterion]['reason']}"
+                for criterion, (name, column, _) in safegold_marketing.CRITERIA.items()
+                if calculated[column] == 0
+            )
         calculated["Current Company"], calculated["Current Title"] = safegold_marketing.current_employment(
             candidate.get("experiences") or [], date.today(),
         )

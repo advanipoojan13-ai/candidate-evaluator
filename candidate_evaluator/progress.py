@@ -388,10 +388,7 @@ def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[d
             state = "completed"
         source_row = candidate.get("source_row") or {}
         if role.key == safegold_marketing.ROLE_KEY:
-            score_fields = safegold_marketing.report_summary(result) if result else {
-                safegold_marketing.EVIDENCED_POINTS: "", safegold_marketing.SCORING_STATUS: "",
-                safegold_marketing.MISSING_CRITERIA: "",
-            }
+            score_fields = {role.total_column: safegold_marketing.report_row(result)[role.total_column] if result else ""}
         else:
             score_fields = {
                 role.total_column: result.get(role.total_column, ""),
@@ -418,10 +415,10 @@ def completed_preview_rows(run_id: str, role_key: Optional[str] = None) -> list[
         return [
             {
                 "Candidate Name": row.get("Candidate", ""),
-                **safegold_marketing.report_summary(row),
+                role.total_column: row[role.total_column],
                 "Score Rationale": row.get("Score Rationale", ""),
             }
-            for row in result_rows(run_id)
+            for row in prepare_output_rows(result_rows(run_id), role)
         ]
     rows = prepare_output_rows(result_rows(run_id), role) if role.ranked else result_rows(run_id)
     return [
@@ -497,7 +494,7 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     role = role_for_run(run_id, role_key)
     output_dir = Path(OUTPUTS_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
-    frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.report_columns)
+    frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.output_columns)
     csv_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.csv"
     xlsx_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
     frame.to_csv(csv_path, index=False, float_format="%.2f" if role.key in {"peeko", "peeko2"} else None)

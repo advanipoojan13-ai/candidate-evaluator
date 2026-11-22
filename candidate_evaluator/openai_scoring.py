@@ -497,10 +497,6 @@ def _response_schema(role: RoleProfile) -> dict[str, Any]:
             "type": "array", "items": {"type": "string", "enum": list(CHANNELS)},
         }
     if role.key == safegold_marketing.ROLE_KEY:
-        for column, allowed in role.allowed_scores.items():
-            grading_props[column] = {
-                "anyOf": [{"type": "integer", "enum": sorted(allowed)}, {"type": "null"}],
-            }
         grading_props[safegold_marketing.AUDIT] = safegold_marketing.audit_schema()
     return {
         "type": "object",

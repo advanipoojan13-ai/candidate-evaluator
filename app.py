@@ -285,7 +285,7 @@ def _custom_role_editor(role_key: str) -> tuple[dict[str, Any] | None, list[str]
             f"{int(role.total_max)} total points, {len(role.outcome_bands)} outcome bands."
         )
         with st.expander("Review generated output columns"):
-            st.write(role.report_columns)
+            st.write(role.output_columns)
     return config, errors
 
 
@@ -1079,7 +1079,7 @@ def _show_downloads(run_id: str) -> None:
     if counts.get("skipped"):
         st.caption(f"{counts['skipped']} skipped profile(s) are logged in Evaluation Status and excluded from downloads.")
     fixed_rows = prepare_output_rows(rows, role)
-    csv_data = _rows_to_csv_bytes(fixed_rows, role.report_columns)
+    csv_data = _rows_to_csv_bytes(fixed_rows, role.output_columns)
     st.subheader("Downloads")
     csv_col, excel_col = st.columns(2)
     with csv_col:
@@ -1093,7 +1093,7 @@ def _show_downloads(run_id: str) -> None:
     with excel_col:
         st.download_button(
             "Download Excel",
-            _rows_to_xlsx_bytes(fixed_rows, role.report_columns),
+            _rows_to_xlsx_bytes(fixed_rows, role.output_columns),
             file_name=f"candidate_evaluation_{run_id}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"download-excel-{run_id}",
@@ -1158,7 +1158,7 @@ def _rows_to_xlsx_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes
                     sheet.column_dimensions[column[0].column_letter].width = 45
     elif columns in (peeko.OUTPUT_COLUMNS, peeko.LEGACY_OUTPUT_COLUMNS, peeko2.OUTPUT_COLUMNS):
         peeko.write_excel(frame, buffer)
-    elif columns == safegold_marketing.REPORT_COLUMNS:
+    elif columns == safegold_marketing.OUTPUT_COLUMNS:
         safegold_marketing.write_excel(frame, buffer)
     else:
         frame.to_excel(buffer, index=False, engine="openpyxl")

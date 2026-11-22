@@ -18,21 +18,15 @@ CRITERIA = {
 }
 SCORES = OrderedDict((column, tiers[-1]) for _, column, tiers in CRITERIA.values())
 ALLOWED_SCORES = {column: set(tiers) for _, column, tiers in CRITERIA.values()}
-TOTAL = "Total (/40)"
+TOTAL = "Final Score (/40)"
+NOTES = "Missing or Unclear Information"
 AUDIT = "Criterion Audit"
-STATES = ("supported", "mention only", "unknown", "explicit absence")
+STATES = ("supported", "mention only", "no qualifying evidence", "explicit absence")
 OUTPUT_COLUMNS = [
     "Candidate", "Profile URL", "Current Company", "Current Title",
-    *SCORES, TOTAL, "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
+    *SCORES, TOTAL, "Strongest Evidence", NOTES, "Score Rationale",
     "Fintech Experience", "Startup Experience", "Relevant Paid-Marketing Duration and Recency",
     "Location and Mumbai Availability",
-]
-EVIDENCED_POINTS = "Evidenced Points (/40)"
-SCORING_STATUS = "Scoring Status"
-MISSING_CRITERIA = "Missing Criteria"
-REPORT_COLUMNS = [
-    *OUTPUT_COLUMNS[:4], EVIDENCED_POINTS, SCORING_STATUS, *SCORES, MISSING_CRITERIA,
-    *OUTPUT_COLUMNS[11:],
 ]
 
 
@@ -50,6 +44,11 @@ def rubric_issue(text: str) -> str:
     ]
     if actual != expected or not re.search(r"\*\*Total\*\*\s*\|\s*\|\s*\*\*40\*\*", text):
         return "Use the SafeGold performance marketing rubric with its six configured score scales and 40-point total."
+    if re.search(
+        r"Use null:|Null is allowed for every criterion|If any criterion is null|"
+        r"Award 0 only if a statement explicitly rules out", text, re.IGNORECASE,
+    ):
+        return "Upload the revised SafeGold rubric that assigns 0 when there is no qualifying evidence."
     return ""
 
 
@@ -77,41 +76,31 @@ def audit_schema() -> dict:
     }
 
 
-def calculate_total(row: dict) -> int | str:
-    unknown = []
+def calculate_total(row: dict) -> int:
     points = 0
-    for criterion, (name, column, tiers) in CRITERIA.items():
+    for _, column, tiers in CRITERIA.values():
         if column not in row:
             raise ValueError(f"Missing required score: {column}.")
         score = row[column]
-        if score is None:
-            unknown.append(f"{criterion} {name}")
-        elif type(score) is not int or score not in tiers:
-            raise ValueError(f"{column} must be null or one of {tiers}.")
-        else:
-            points += score
-    if unknown:
-        return f"{points} evidenced points; incomplete — {', '.join(unknown)}"
+        if type(score) is not int or score not in tiers:
+            raise ValueError(f"{column} must be an integer from {tiers}.")
+        points += score
     return points
 
 
-def report_summary(row: dict) -> dict:
-    """Summarize evidence from saved criterion scores, including older runs."""
-    missing = [name for name, column, _ in CRITERIA.values() if row.get(column) in (None, "")]
-    points = sum(row[column] for column in SCORES if row.get(column) not in (None, ""))
-    return {
-        EVIDENCED_POINTS: points,
-        SCORING_STATUS: "Incomplete" if missing else "Complete",
-        MISSING_CRITERIA: ", ".join(missing),
-    }
-
-
 def report_row(row: dict) -> dict:
-    report = {**row, **report_summary(row)}
-    for column in SCORES:
+    """Display legacy unscored criteria as zero while preserving the saved result."""
+    report = dict(row)
+    legacy_gaps = []
+    for name, column, _ in CRITERIA.values():
         if report.get(column) in (None, ""):
-            report[column] = "Unknown"
-    return {column: report.get(column, "") for column in REPORT_COLUMNS}
+            report[column] = 0
+            legacy_gaps.append(name)
+    if legacy_gaps:
+        note = f"Previously unscored criteria are shown as 0: {', '.join(legacy_gaps)}."
+        report[NOTES] = " ".join(filter(None, (report.get(NOTES), note)))
+    report[TOTAL] = calculate_total(report)
+    return {column: report.get(column, "") for column in OUTPUT_COLUMNS}
 
 
 def write_excel(frame, destination) -> None:
@@ -126,8 +115,8 @@ def write_excel(frame, destination) -> None:
         sheet.auto_filter.ref = sheet.dimensions
         sheet.row_dimensions[1].height = 32
         for index, column in enumerate(frame.columns, start=1):
-            is_score = column in SCORES or column == EVIDENCED_POINTS
-            width = 16 if is_score else 24 if index < 7 else 44
+            is_score = column in SCORES or column == TOTAL
+            width = 16 if is_score else 24 if index <= 4 else 44
             sheet.column_dimensions[get_column_letter(index)].width = width
             for (cell,) in sheet.iter_rows(min_col=index, max_col=index):
                 cell.alignment = Alignment(
@@ -148,7 +137,7 @@ def assessed_audit(row: dict, sources: dict) -> dict:
         if not isinstance(entry, dict):
             raise ValueError(f"{criterion} audit must be an object.")
         expected_states = {
-            None: ("unknown",), 0: ("explicit absence",), 1: ("mention only",),
+            0: ("no qualifying evidence", "explicit absence"), 1: ("mention only",),
         }.get(score, ("supported",))
         if criterion == "C6" and score == 1:
             expected_states = ("mention only", "supported")
@@ -156,12 +145,14 @@ def assessed_audit(row: dict, sources: dict) -> dict:
             raise ValueError(f"{criterion} evidence state does not match the score.")
         if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
             raise ValueError(f"{criterion} audit requires a reason.")
-        if score is not None and (
+        if score > 0 and (
             not isinstance(entry.get("anchor_matched"), str) or not entry["anchor_matched"].strip()
         ):
             raise ValueError(f"{criterion} audit requires a matched score anchor.")
         claims = entry.get("claims")
-        if not isinstance(claims, list) or (score is not None and not claims):
+        if not isinstance(claims, list) or (
+            (score > 0 or entry["evidence_state"] == "explicit absence") and not claims
+        ):
             raise ValueError(f"{criterion} audit requires source claims for an assessed score.")
         for claim in claims:
             if not isinstance(claim, dict):

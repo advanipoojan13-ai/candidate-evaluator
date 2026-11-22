@@ -22,9 +22,9 @@ ROLE = get_role_profile(marketing.ROLE_KEY)
 GOOGLE, META, APP, TESTING, OPTIMISATION, MEASUREMENT = ROLE.category_scores
 QUOTE = "I managed Google Ads and tested video against carousel creative."
 SOURCE = "work_experience[0].description"
-UPLOADED_RUBRIC = """# Test upload for SafeGold performance marketing
+UPLOADED_RUBRIC = '''# SafeGold numeric scoring example
 
-| ID | Criterion | Allowed scores | Maximum |
+| ID | Capability | Allowed scores | Maximum |
 |---|---|---|---:|
 | C1 | Google Ads operations | 0, 1, 2, 4, 6 | 6 |
 | C2 | Meta Ads operations | 0, 1, 2, 4, 6 | 6 |
@@ -33,7 +33,9 @@ UPLOADED_RUBRIC = """# Test upload for SafeGold performance marketing
 | C5 | Optimisation and scaling | 0, 1, 2, 4, 6 | 6 |
 | C6 | Measurement and analysis | 0, 1, 3, 5 | 5 |
 | | **Total** | | **40** |
-"""
+
+Award 0 when no positive tier qualifies.
+'''
 
 
 def load_profile(**extra):
@@ -55,20 +57,20 @@ def load_profile(**extra):
 def grading(scores):
     audit = {}
     for criterion, value in zip(marketing.CRITERIA, scores):
-        state = {None: "unknown", 0: "explicit absence", 1: "mention only"}.get(value, "supported")
+        state = {0: "no qualifying evidence", 1: "mention only"}.get(value, "supported")
         audit[criterion] = {
             "evidence_state": state,
-            "claims": [] if value is None else [
+            "claims": [] if value == 0 else [
                 {"source_path": SOURCE, "role_or_project": "Performance Marketer", "supporting_text": QUOTE}
             ],
-            "anchor_matched": "" if value is None else f"Score {value}",
-            "reason": "The section did not establish the criterion." if value is None else "Example assessed evidence.",
+            "anchor_matched": "" if value == 0 else f"Score {value}",
+            "reason": "The section did not establish the criterion." if value == 0 else "Example assessed evidence.",
         }
     return {
         **dict(zip(ROLE.category_scores, scores)),
         marketing.AUDIT: audit,
         "Strongest Evidence": "Example Studio: managed Google Ads",
-        "Missing or Unclear Information": "Some capabilities are unverified." if None in scores else "",
+        "Missing or Unclear Information": "",
         "Score Rationale": "The profile provides evidence of Google Ads work.",
         "Fintech Experience": "No",
         "Startup Experience": "No",
@@ -77,7 +79,7 @@ def grading(scores):
     }
 
 
-def test_role_loads_rubric_and_nullable_schema():
+def test_role_uses_uploaded_rubric_and_requires_integer_scores():
     assert role_options()["Safegold - Performance Marketer"] == ROLE.key
     assert _default_rubric_path(ROLE.key) == ""
     assert _load_inputs(None, "", None, "", ROLE.key) == ([], "")
@@ -88,7 +90,9 @@ def test_role_loads_rubric_and_nullable_schema():
     assert rubric_input_issue(support, ROLE)
     assert rubric_input_issue(rubric.replace("0, 1, 3, 6, 9", "0, 1, 2, 6, 9"), ROLE)
     props = openai_scoring._response_schema(ROLE)["properties"]["grading"]["properties"]
-    assert props[GOOGLE]["anyOf"] == [{"type": "integer", "enum": [0, 1, 2, 4, 6]}, {"type": "null"}]
+    assert props[GOOGLE]["type"] == "integer"
+    assert props[GOOGLE]["enum"] == [0, 1, 2, 4, 6]
+    assert rubric_input_issue(rubric + "\nNull is allowed for every criterion.", ROLE)
     assert props[marketing.AUDIT]["required"] == list(marketing.CRITERIA)
     assert marketing.TOTAL not in props and "Current Company" not in props
 
@@ -142,20 +146,20 @@ def test_unipile_open_ended_job_wins_over_older_ended_job():
         {"company": "Unconfirmed Studio", "role": "Lead", "start": "2024-05", "is_current": False},
     ])
     assert [role["is_current"] for role in candidate["experiences"]] == [False, True, False, False]
-    row = apply_calculated_fields(grading((None,) * 6), candidate, ROLE)
+    row = apply_calculated_fields(grading((0,) * 6), candidate, ROLE)
     assert (row["Current Company"], row["Current Title"]) == ("Current Studio", "Marketer")
 
 
-@pytest.mark.parametrize("invalid", [3, -1, True, "4", 4.0])
+@pytest.mark.parametrize("invalid", [None, 3, -1, True, "4", 4.0])
 def test_rejects_invalid_score_types_and_tiers(invalid):
     candidate, _ = load_profile()
     with pytest.raises(ValueError, match="Google Ads Score"):
-        apply_calculated_fields(grading((invalid, None, None, None, None, None)), candidate, ROLE)
+        apply_calculated_fields(grading((invalid, 0, 0, 0, 0, 0)), candidate, ROLE)
 
 
 def test_rejects_missing_scores_and_unverifiable_claims():
     candidate, _ = load_profile()
-    grade = grading((2, None, None, None, None, None))
+    grade = grading((2, 0, 0, 0, 0, 0))
     grade[marketing.AUDIT]["C1"]["claims"][0]["supporting_text"] = "Invented results."
     with pytest.raises(ValueError, match="quote must match"):
         apply_calculated_fields(grade, candidate, ROLE)
@@ -164,12 +168,12 @@ def test_rejects_missing_scores_and_unverifiable_claims():
         apply_calculated_fields(grade, candidate, ROLE)
 
 
-def test_full_evaluator_path_exports_incomplete_and_complete_results(monkeypatch, tmp_path):
+def test_full_evaluator_path_exports_numeric_results(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     candidate, rubric = load_profile()
     second = {**candidate, "linkedin_profile_id": "second", "source_index": 1}
     candidates = [candidate, second]
-    scores = [(2, None, 0, 6, None, 1), (6, 6, 8, 9, 6, 5)]
+    scores = [(4, 4, 0, 0, 4, 1), (6, 6, 8, 9, 6, 5)]
     model_response = {"evaluations": [
         {"candidate_number": index, "grading": grading(values)} for index, values in enumerate(scores, 1)
     ]}
@@ -183,39 +187,48 @@ def test_full_evaluator_path_exports_incomplete_and_complete_results(monkeypatch
     progress.commit_batch_results("pm", candidates, batch)
     assert progress.role_for_run("pm").key == ROLE.key
     partial, complete = progress.result_rows("pm")
-    assert partial[META] is None and partial[APP] == 0
-    assert partial[marketing.TOTAL].startswith("9 evidenced points; incomplete")
-    assert "C2 Meta Ads operations" in partial[marketing.TOTAL]
+    assert partial[APP] == 0 and partial[TESTING] == 0
+    assert partial[marketing.TOTAL] == 13
     assert complete[marketing.TOTAL] == 40
-    assert partial[marketing.AUDIT]["C2"]["score"] is None
     assert partial[marketing.AUDIT]["C3"]["score"] == 0
+    assert not partial[marketing.AUDIT]["C3"]["claims"]
+    assert "App acquisition:" in partial[marketing.NOTES]
+    assert "Experimentation:" in partial[marketing.NOTES]
+    assert complete[marketing.NOTES] == ""
     assert partial["Current Company"] == "Example Studio"
     rows = prepare_output_rows([partial, complete], ROLE)
-    columns = ROLE.report_columns
+    columns = ROLE.output_columns
     assert list(rows[0]) == columns
-    assert rows[0][marketing.EVIDENCED_POINTS] == 9
-    assert rows[0][marketing.SCORING_STATUS] == "Incomplete"
-    assert rows[0][marketing.MISSING_CRITERIA] == "Meta Ads operations, Optimisation and scaling"
-    assert rows[1][marketing.SCORING_STATUS] == "Complete"
-    assert rows[1][marketing.MISSING_CRITERIA] == ""
-    assert marketing.TOTAL not in rows[0]
 
     csv_rows = list(csv.DictReader(StringIO(_rows_to_csv_bytes(rows, columns).decode())))
-    assert csv_rows[0][META] == "Unknown" and csv_rows[0][APP] == "0"
-    assert csv_rows[0][marketing.EVIDENCED_POINTS] == "9"
+    assert csv_rows[0][APP] == "0"
+    assert csv_rows[0][marketing.TOTAL] == "13"
     workbook = load_workbook(BytesIO(_rows_to_xlsx_bytes(rows, columns)))
     sheet = workbook["Candidates"]
     values = list(sheet.values)
     assert sheet.freeze_panes == "B2"
     assert sheet.auto_filter.ref == sheet.dimensions
     assert sheet["A2"].alignment.wrap_text
-    assert values[1][columns.index(META)] == "Unknown"
     assert values[1][columns.index(APP)] == 0
-    assert values[2][columns.index(marketing.EVIDENCED_POINTS)] == 40
+    assert values[1][columns.index(marketing.TOTAL)] == 13
+    assert values[2][columns.index(marketing.TOTAL)] == 40
 
-    assert progress.completed_preview_rows("pm")[0][marketing.EVIDENCED_POINTS] == 9
-    assert progress.candidate_status_rows("pm")[0][marketing.SCORING_STATUS] == "Incomplete"
+    assert progress.completed_preview_rows("pm")[0][marketing.TOTAL] == 13
+    assert progress.candidate_status_rows("pm")[0][marketing.TOTAL] == 13
     csv_path, xlsx_path = progress.save_exports("pm", [partial, complete])
     with csv_path.open(encoding="utf-8", newline="") as handle:
         assert list(csv.DictReader(handle)) == csv_rows
     assert list(load_workbook(xlsx_path)["Candidates"].values) == values
+
+
+def test_all_zero_and_legacy_saved_scores():
+    candidate, _ = load_profile()
+    result = apply_calculated_fields(grading((0, 0, 0, 0, 0, 0)), candidate, ROLE)
+    assert result[marketing.TOTAL] == 0
+    assert len(result[marketing.AUDIT]) == 6
+    legacy = {**result, GOOGLE: 4, APP: None, "Total (/40)": "4 evidenced points; incomplete"}
+    legacy.pop(marketing.TOTAL)
+    [row] = prepare_output_rows([legacy], ROLE)
+    assert row[APP] == 0 and row[marketing.TOTAL] == 4
+    assert "Previously unscored criteria are shown as 0: App acquisition." in row[marketing.NOTES]
+    assert legacy[APP] is None

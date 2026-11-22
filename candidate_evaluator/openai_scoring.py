@@ -11,6 +11,7 @@ from openai import OpenAI
 from .evidence import custom_evidence_payload
 from .extractor import merge_duplicate_experiences
 from .providers import DEEPSEEK_PROVIDER_KEY, DEFAULT_PROVIDER_KEY, ProviderProfile, get_provider
+from . import safegold_performance_marketer as safegold_marketing
 from .roles import RoleProfile, get_role_profile
 from .rubric_contract import rubric_input_issue
 
@@ -401,6 +402,24 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
             {field: project[field] for field in ("name", "description", "technologies") if field in project}
             for project in filtered_payload["Projects"]
         ]
+    if role.key == safegold_marketing.ROLE_KEY:
+        from .dates import prepare_experience_dates
+
+        for section in ("experiences", "Projects"):
+            if section in filtered_payload:
+                if section == "Projects":
+                    filtered_payload[section] = [
+                        {field: value for field, value in project.items() if field != "technologies"}
+                        for project in filtered_payload[section]
+                    ]
+                filtered_payload[section] = prepare_experience_dates(filtered_payload[section], date.today())
+                for entry in filtered_payload[section]:
+                    entry["calculated_dates"].pop("months_since_end", None)
+        filtered_payload["Source Text"] = candidate.get("marketing_source_text", {})
+        filtered_payload["Source Availability"] = {
+            "visibility": candidate.get("source_visibility", ""),
+            "throttled_sections": candidate.get("throttled_sections", []),
+        }
     return filtered_payload
 
 
@@ -477,6 +496,12 @@ def _response_schema(role: RoleProfile) -> dict[str, Any]:
         grading_props[SAFEGOLD_CHANNELS_COLUMN] = {
             "type": "array", "items": {"type": "string", "enum": list(CHANNELS)},
         }
+    if role.key == safegold_marketing.ROLE_KEY:
+        for column, allowed in role.allowed_scores.items():
+            grading_props[column] = {
+                "anyOf": [{"type": "integer", "enum": sorted(allowed)}, {"type": "null"}],
+            }
+        grading_props[safegold_marketing.AUDIT] = safegold_marketing.audit_schema()
     return {
         "type": "object",
         "additionalProperties": False,

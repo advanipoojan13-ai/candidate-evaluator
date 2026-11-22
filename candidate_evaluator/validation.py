@@ -6,6 +6,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
+from . import safegold_performance_marketer as safegold_marketing
 from .roles import RoleProfile, get_role_profile
 
 
@@ -38,7 +39,7 @@ def normalize_rationale_row(
     """Cap rationale for roles with export-time limits, preserving numeric scores."""
     role = _resolve_role(role_or_key)
     normalized = dict(row)
-    if role.key in {"sde3", "fe_orange", "safegold"} and "Score Rationale" in normalized:
+    if role.key in {"sde3", "fe_orange", "safegold", safegold_marketing.ROLE_KEY} and "Score Rationale" in normalized:
         normalized["Score Rationale"] = limit_rationale(
             str(normalized["Score Rationale"] or ""), max_words=role.rationale_max_words
         )
@@ -65,8 +66,9 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
     if missing:
         errors.append(f"Missing required columns: {', '.join(missing)}")
 
+    marketing = role.key == safegold_marketing.ROLE_KEY
     category_scores = []
-    for column, maximum in role.category_scores.items():
+    for column, maximum in (() if marketing else role.category_scores.items()):
         score = _as_number(row.get(column), column, errors, integer_only=not role.numeric_scores)
         if score is None:
             continue
@@ -82,7 +84,17 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
         if score is not None and (score < 0 or score > maximum):
             errors.append(f"{column} must be between 0 and {maximum}; got {score}.")
 
-    total = _as_number(row.get(role.total_column), role.total_column, errors, integer_only=not role.numeric_scores)
+    total = None
+    if marketing:
+        try:
+            expected = safegold_marketing.calculate_total(row)
+            value = row.get(role.total_column)
+            if type(value) is not type(expected) or value != expected:
+                errors.append(f"{role.total_column} must match the calculated result: {expected}.")
+        except ValueError as exc:
+            errors.append(str(exc))
+    else:
+        total = _as_number(row.get(role.total_column), role.total_column, errors, integer_only=not role.numeric_scores)
     if total is not None:
         if total > role.total_max:
             errors.append(f"{role.total_column} must be no more than {role.total_max}; got {total}.")
@@ -156,6 +168,8 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
         + (role.ranking_tiebreaker_columns or [])
     )
     for column in numeric_columns:
+        if role.key == safegold_marketing.ROLE_KEY and (fixed[column] is None or column == role.total_column):
+            continue
         if fixed[column] != "":
             errors: list[str] = []
             integer_only = column in role.component_score_maxima or not role.numeric_scores
@@ -193,6 +207,15 @@ def apply_calculated_fields(
             {key: row[key] for key in scoring.grading_schema()["required"] if key in row}, candidate, date.today(),
         )
     calculated = dict(row)
+    if role.key == safegold_marketing.ROLE_KEY:
+        calculated[role.total_column] = safegold_marketing.calculate_total(calculated)
+        calculated[safegold_marketing.AUDIT] = safegold_marketing.assessed_audit(
+            calculated, candidate.get("marketing_source_text", {}),
+        )
+        calculated["Current Company"], calculated["Current Title"] = safegold_marketing.current_employment(
+            candidate.get("experiences") or [], date.today(),
+        )
+        return calculated
     if role.key == "safegold":
         from .safegold import normalize_grading
 

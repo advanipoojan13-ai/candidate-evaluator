@@ -165,12 +165,31 @@ def test_full_evaluator_path_exports_incomplete_and_complete_results(monkeypatch
     assert partial[marketing.AUDIT]["C3"]["score"] == 0
     assert partial["Current Company"] == "Example Studio"
     rows = prepare_output_rows([partial, complete], ROLE)
-    assert list(rows[0]) == ROLE.output_columns
-    assert len(rows[0]) == 18
-    csv_rows = list(csv.DictReader(StringIO(_rows_to_csv_bytes(rows, ROLE.output_columns).decode())))
-    assert csv_rows[0][META] == "" and csv_rows[0][APP] == "0"
-    workbook = load_workbook(BytesIO(_rows_to_xlsx_bytes(rows, ROLE.output_columns)))
-    values = list(workbook.active.values)
-    assert values[1][ROLE.output_columns.index(META)] is None
-    assert values[1][ROLE.output_columns.index(APP)] == 0
-    assert values[2][ROLE.output_columns.index(marketing.TOTAL)] == 40
+    columns = ROLE.report_columns
+    assert list(rows[0]) == columns
+    assert rows[0][marketing.EVIDENCED_POINTS] == 9
+    assert rows[0][marketing.SCORING_STATUS] == "Incomplete"
+    assert rows[0][marketing.MISSING_CRITERIA] == "Meta Ads operations, Optimisation and scaling"
+    assert rows[1][marketing.SCORING_STATUS] == "Complete"
+    assert rows[1][marketing.MISSING_CRITERIA] == ""
+    assert marketing.TOTAL not in rows[0]
+
+    csv_rows = list(csv.DictReader(StringIO(_rows_to_csv_bytes(rows, columns).decode())))
+    assert csv_rows[0][META] == "Unknown" and csv_rows[0][APP] == "0"
+    assert csv_rows[0][marketing.EVIDENCED_POINTS] == "9"
+    workbook = load_workbook(BytesIO(_rows_to_xlsx_bytes(rows, columns)))
+    sheet = workbook["Candidates"]
+    values = list(sheet.values)
+    assert sheet.freeze_panes == "B2"
+    assert sheet.auto_filter.ref == sheet.dimensions
+    assert sheet["A2"].alignment.wrap_text
+    assert values[1][columns.index(META)] == "Unknown"
+    assert values[1][columns.index(APP)] == 0
+    assert values[2][columns.index(marketing.EVIDENCED_POINTS)] == 40
+
+    assert progress.completed_preview_rows("pm")[0][marketing.EVIDENCED_POINTS] == 9
+    assert progress.candidate_status_rows("pm")[0][marketing.SCORING_STATUS] == "Incomplete"
+    csv_path, xlsx_path = progress.save_exports("pm", [partial, complete])
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        assert list(csv.DictReader(handle)) == csv_rows
+    assert list(load_workbook(xlsx_path)["Candidates"].values) == values

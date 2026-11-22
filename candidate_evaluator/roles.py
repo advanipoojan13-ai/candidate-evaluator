@@ -75,6 +75,10 @@ class RoleProfile:
         return self.export_columns or (SOURCE_COLUMNS + self.grading_columns)
 
     @property
+    def report_columns(self) -> list[str]:
+        return safegold_marketing.REPORT_COLUMNS if self.key == safegold_marketing.ROLE_KEY else self.output_columns
+
+    @property
     def model_grading_columns(self) -> list[str]:
         """Fields requiring judgement rather than deterministic application code."""
         calculated = {self.total_column, self.outcome_column}
@@ -1154,6 +1158,8 @@ def prepare_output_rows(
 
     role = role_or_key if isinstance(role_or_key, RoleProfile) else get_role_profile(role_or_key, custom_config)
     prepared = [normalize_rationale_row(row, role) for row in rows]
+    if role.key == safegold_marketing.ROLE_KEY:
+        return [safegold_marketing.report_row(row) for row in prepared]
     if role.ranked:
         tie_columns = role.ranking_tiebreaker_columns or []
 

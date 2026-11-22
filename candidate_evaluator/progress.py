@@ -15,6 +15,7 @@ try:
 except ImportError:  # pragma: no cover - non-Unix fallback
     fcntl = None
 
+from . import safegold_performance_marketer as safegold_marketing
 from .constants import OUTPUTS_DIR, RUNS_DIR
 from .providers import DEFAULT_PROVIDER_KEY, get_provider
 from .roles import DEFAULT_ROLE_KEY, RoleProfile, get_role_profile, prepare_output_rows
@@ -376,7 +377,7 @@ def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[d
     status = load_status(run_id)
     status_by_id = status.get("candidates", {})
     rows_by_id = result_rows_by_id(run_id)
-    ranked_rows = prepare_output_rows(list(rows_by_id.values()), role)
+    ranked_rows = prepare_output_rows(list(rows_by_id.values()), role) if role.ranked else []
     rank_by_url = {row.get("Profile URL"): row.get(role.outcome_column, "") for row in ranked_rows}
     rows = []
     for candidate in candidates:
@@ -386,16 +387,25 @@ def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[d
         if result:
             state = "completed"
         source_row = candidate.get("source_row") or {}
-        rows.append(
-            {
-                "Candidate Name": candidate.get("candidate_name") or source_row.get("Candidate Name") or candidate_id,
-                "Status": _display_state(state),
+        if role.key == safegold_marketing.ROLE_KEY:
+            score_fields = safegold_marketing.report_summary(result) if result else {
+                safegold_marketing.EVIDENCED_POINTS: "", safegold_marketing.SCORING_STATUS: "",
+                safegold_marketing.MISSING_CRITERIA: "",
+            }
+        else:
+            score_fields = {
                 role.total_column: result.get(role.total_column, ""),
                 role.outcome_column: (
                     rank_by_url.get(result.get("Profile URL"), "")
                     if role.ranked
                     else result.get(role.outcome_column, "")
                 ),
+            }
+        rows.append(
+            {
+                "Candidate Name": candidate.get("candidate_name") or source_row.get("Candidate Name") or candidate_id,
+                "Status": _display_state(state),
+                **score_fields,
                 "Error Message": status_by_id.get(candidate_id, {}).get("error", ""),
             }
         )
@@ -404,6 +414,15 @@ def candidate_status_rows(run_id: str, role_key: Optional[str] = None) -> list[d
 
 def completed_preview_rows(run_id: str, role_key: Optional[str] = None) -> list[dict[str, Any]]:
     role = role_for_run(run_id, role_key)
+    if role.key == safegold_marketing.ROLE_KEY:
+        return [
+            {
+                "Candidate Name": row.get("Candidate", ""),
+                **safegold_marketing.report_summary(row),
+                "Score Rationale": row.get("Score Rationale", ""),
+            }
+            for row in result_rows(run_id)
+        ]
     rows = prepare_output_rows(result_rows(run_id), role) if role.ranked else result_rows(run_id)
     return [
         {
@@ -478,7 +497,7 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
     role = role_for_run(run_id, role_key)
     output_dir = Path(OUTPUTS_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
-    frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.output_columns)
+    frame = pd.DataFrame(prepare_output_rows(rows, role), columns=role.report_columns)
     csv_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.csv"
     xlsx_path = output_dir / f"candidate_evaluation_{role.key}_{run_id}.xlsx"
     frame.to_csv(csv_path, index=False, float_format="%.2f" if role.key in {"peeko", "peeko2"} else None)
@@ -486,6 +505,8 @@ def save_exports(run_id: str, rows: list[dict[str, Any]], role_key: Optional[str
         from .peeko import write_excel
 
         write_excel(frame, xlsx_path)
+    elif role.key == safegold_marketing.ROLE_KEY:
+        safegold_marketing.write_excel(frame, xlsx_path)
     else:
         frame.to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path

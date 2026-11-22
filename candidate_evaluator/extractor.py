@@ -9,6 +9,7 @@ from typing import Any, Optional, Union
 from .constants import SOURCE_COLUMNS
 from .dates import _parse_date
 from .evidence import has_selected_evidence
+from .safegold_performance_marketer import ROLE_KEY as SAFEGOLD_MARKETING
 
 
 ALLOWED_EXPERIENCE_FIELDS = [
@@ -102,6 +103,7 @@ def _looks_like_profile(record: dict[str, Any]) -> bool:
 def normalize_candidate(
     profile: dict[str, Any], index: int, *, head_sales: bool = False,
     include_project_dates: bool = False, peeko: bool = False, safegold: bool = False,
+    safegold_marketing: bool = False,
 ) -> dict[str, Any]:
     specifics = _linkedin_specifics(profile)
     experience_items, current_positions = _experience_items(profile, specifics)
@@ -115,6 +117,8 @@ def normalize_candidate(
         for i, exp in enumerate(experience_items)
         if isinstance(exp, dict) and (exp or not head_sales_unipile)
     ]
+    if safegold_marketing:
+        experiences, marketing_sources = _marketing_evidence(profile, specifics)
     education_items = _first_list(profile.get("education"), specifics.get("education"))
     education = [_format_education(edu) for edu in education_items if isinstance(edu, dict)]
     public_identifier = _first_nonempty(profile.get("publicIdentifier"), profile.get("public_identifier"))
@@ -169,6 +173,8 @@ def normalize_candidate(
     from .url_links import extract_links
 
     candidate["url_entries"] = extract_links(profile)
+    if safegold_marketing:
+        candidate["marketing_source_text"] = marketing_sources
     if safegold:
         candidate["languages"] = _normalize_languages(
             _first_list(profile.get("languages"), specifics.get("languages"))
@@ -180,11 +186,12 @@ def normalize_candidate(
 def normalize_candidates(
     profiles: list[dict[str, Any]], *, head_sales: bool = False,
     include_project_dates: bool = False, peeko: bool = False, safegold: bool = False,
+    safegold_marketing: bool = False,
 ) -> list[dict[str, Any]]:
     candidates = [
         normalize_candidate(
             profile, index, head_sales=head_sales, include_project_dates=include_project_dates,
-            peeko=peeko, safegold=safegold,
+            peeko=peeko, safegold=safegold, safegold_marketing=safegold_marketing,
         )
         for index, profile in enumerate(profiles)
     ]
@@ -247,9 +254,10 @@ def candidate_input_issue(
     if role_key == "portfolio_links":
         return ""
     reasons = []
-    if role_key != "safegold" and candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial":
+    allow_partial = role_key in {"safegold", SAFEGOLD_MARKETING}
+    if not allow_partial and candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial":
         reasons.append("Unipile returned a partial profile; retrieve the complete profile before evaluation")
-    throttled = _relevant_throttled_sections(candidate, evidence_sources) if role_key != "safegold" else []
+    throttled = [] if allow_partial else _relevant_throttled_sections(candidate, evidence_sources)
     if throttled:
         reasons.append(
             "Unipile throttled required profile section(s): " + ", ".join(throttled)
@@ -294,7 +302,7 @@ def candidate_input_issues(
             post_records.append(candidate_id)
         if not candidate.get("candidate_name") or not linkedin_url:
             missing_identity_records.append(candidate_id)
-        if role_key != "safegold" and (
+        if role_key not in {"safegold", SAFEGOLD_MARKETING} and (
             (candidate.get("source_format") == "unipile" and candidate.get("source_visibility") == "partial")
             or _relevant_throttled_sections(candidate, evidence_sources)
         ):
@@ -676,6 +684,103 @@ def _experience_items(
         if isinstance(value, list) and value:
             return value, current_position
     return [], False
+
+
+def _marketing_evidence(profile: dict, specifics: dict) -> tuple[list[dict], dict[str, str]]:
+    """Retain original profile paths for auditable marketing evidence."""
+    nested = "specifics" if profile.get("specifics") is specifics else "specifics.linkedin"
+    sources: dict[str, str] = {}
+    for aliases in (("headline", "description"), ("about", "summary", "bio")):
+        key = next((key for key in aliases if isinstance(profile.get(key), str) and profile[key].strip()), None)
+        if key:
+            sources[key] = profile[key]
+
+    collections = [
+        ("experience", profile.get("experience")),
+        ("work_experience", profile.get("work_experience")),
+        (f"{nested}.experience", specifics.get("experience")),
+        ("current_positions", profile.get("current_positions")),
+    ]
+    experiences = []
+    for prefix, items in collections:
+        if not isinstance(items, list):
+            continue
+        for index, item in enumerate(items):
+            if not isinstance(item, dict) or not item:
+                continue
+            path = f"{prefix}[{index}]"
+            role = _normalize_experience(
+                item, len(experiences),
+                current_position=prefix == "current_positions", safegold=True,
+            )
+            claim_paths = []
+            for key in ("description", "position", "title", "role", "job_title"):
+                claim_paths.extend(_marketing_text_source(sources, f"{path}.{key}", item.get(key)))
+            for key in ("skills", "tools", "technologies"):
+                if not isinstance(item.get(key), list):
+                    continue
+                for skill_index, skill in enumerate(item[key]):
+                    claim_paths.extend(_marketing_text_source(sources, f"{path}.{key}[{skill_index}]", skill))
+            role["source_paths"] = claim_paths
+            # A current-position snapshot may omit dates already supplied by a
+            # full experience record. Only merge a uniquely matching snapshot.
+            same_role = [
+                existing for existing in experiences
+                if role["company_name"] and role["position_or_title"]
+                and all(role[field].casefold() == existing[field].casefold()
+                        for field in ("company_name", "position_or_title"))
+            ]
+            matches = [
+                existing for existing in same_role
+                if (
+                    all(role[field] == existing[field] for field in ("start_date", "end_date"))
+                    or (prefix == "current_positions"
+                        and (not role["start_date"] or role["start_date"] == existing["start_date"])
+                        and existing["end_date"].casefold() in {"", "present", "current"}
+                        and role["end_date"].casefold() in {"", "present", "current"})
+                )
+            ]
+            if len(matches) == 1:
+                existing = matches[0]
+                combined = merge_duplicate_experiences([existing, {
+                    **role, **{field: existing[field] for field in ("start_date", "end_date", "duration")},
+                }], preserve_employment_details=True)[0]
+                combined["source_paths"] = list(dict.fromkeys(existing["source_paths"] + claim_paths))
+                durations = list(dict.fromkeys(value for value in (existing["duration"], role["duration"]) if value))
+                if len(durations) > 1:
+                    combined["date_conflict"] = True
+                    combined["duration"] = " | ".join(durations)
+                elif durations:
+                    combined["duration"] = durations[0]
+                existing.update(combined)
+            else:
+                for existing in same_role:
+                    if any(role[field] and role[field] == existing[field] for field in ("start_date", "end_date")):
+                        existing["date_conflict"] = role["date_conflict"] = True
+                experiences.append(role)
+
+    projects = _first_list(profile.get("projects"), specifics.get("projects"))
+    prefix = "projects" if projects is profile.get("projects") else f"{nested}.projects"
+    for index, project in enumerate(projects):
+        if isinstance(project, str) and _clean(project):
+            sources[f"{prefix}[{index}]"] = project
+        elif isinstance(project, dict):
+            key = next((key for key in ("description", "summary")
+                        if isinstance(project.get(key), str) and project[key].strip()), None)
+            if key:
+                sources[f"{prefix}[{index}].{key}"] = project[key]
+    return experiences, sources
+
+
+def _marketing_text_source(sources: dict[str, str], path: str, value: Any) -> list[str]:
+    if isinstance(value, dict):
+        for key in ("name", "text", "title"):
+            if isinstance(value.get(key), str) and value[key].strip():
+                return _marketing_text_source(sources, f"{path}.{key}", value[key])
+    if isinstance(value, str) and value.strip():
+        sources[path] = value
+        return [path]
+    return []
 
 
 def _is_unipile_profile(profile: dict[str, Any], head_sales: bool) -> bool:

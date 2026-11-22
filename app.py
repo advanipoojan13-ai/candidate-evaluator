@@ -374,6 +374,7 @@ def _default_rubric_path(role_key: str) -> str:
         "fe_orange": "fe_orange.md",
         "peeko2": "peeko2.md",
         "safegold": "safegold.md",
+        "safegold_performance_marketer": "safegold_performance_marketer.md",
     }
     if role_key in bundled_rubrics:
         bundled = Path(__file__).parent / "rubrics" / bundled_rubrics[role_key]
@@ -387,18 +388,21 @@ def _load_inputs(
     candidates: list[dict[str, Any]] = []
     rubric_text = "Local URL extraction" if role_key == "portfolio_links" else ""
     head_sales = role_key == "head_sales"
-    include_project_dates = role_key == "fe_orange"
+    safegold_marketing = role_key == "safegold_performance_marketer"
+    include_project_dates = role_key == "fe_orange" or safegold_marketing
     peeko = role_key in {"peeko", "peeko2"}
     safegold = role_key == "safegold"
     try:
         if json_upload is not None:
             candidates = _candidates_from_json_text(
-                json_upload.getvalue().decode("utf-8"), head_sales, include_project_dates, peeko, safegold
+                json_upload.getvalue().decode("utf-8"), head_sales, include_project_dates, peeko, safegold,
+                safegold_marketing,
             )
         elif sample_path:
             path = Path(sample_path)
             candidates = _candidates_from_json_path(
-                str(path), path.stat().st_mtime_ns, head_sales, include_project_dates, peeko, safegold
+                str(path), path.stat().st_mtime_ns, head_sales, include_project_dates, peeko, safegold,
+                safegold_marketing,
             )
     except Exception as exc:
         st.error(f"Could not read LinkedIn JSON: {exc}")
@@ -416,22 +420,24 @@ def _load_inputs(
 @st.cache_data(show_spinner=False)
 def _candidates_from_json_text(
     text: str, head_sales: bool, include_project_dates: bool = False,
-    peeko: bool = False, safegold: bool = False,
+    peeko: bool = False, safegold: bool = False, safegold_marketing: bool = False,
 ) -> list[dict[str, Any]]:
     return normalize_candidates(
         load_profiles_from_text(text, head_sales=head_sales), head_sales=head_sales,
         include_project_dates=include_project_dates, peeko=peeko, safegold=safegold,
+        safegold_marketing=safegold_marketing,
     )
 
 
 @st.cache_data(show_spinner=False)
 def _candidates_from_json_path(
     path: str, _mtime_ns: int, head_sales: bool, include_project_dates: bool = False,
-    peeko: bool = False, safegold: bool = False,
+    peeko: bool = False, safegold: bool = False, safegold_marketing: bool = False,
 ) -> list[dict[str, Any]]:
     return normalize_candidates(
         load_profiles(path, head_sales=head_sales), head_sales=head_sales,
         include_project_dates=include_project_dates, peeko=peeko, safegold=safegold,
+        safegold_marketing=safegold_marketing,
     )
 
 
@@ -1093,6 +1099,11 @@ def _show_downloads(run_id: str) -> None:
             key=f"download-excel-{run_id}",
         )
     st.subheader("Completed Output")
+    if role.key == "safegold_performance_marketer":
+        fixed_rows = [
+            {column: "" if value is None else value for column, value in row.items()}
+            for row in fixed_rows
+        ]
     _display_table(fixed_rows)
 
 

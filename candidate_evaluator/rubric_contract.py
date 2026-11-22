@@ -4,12 +4,15 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from . import safegold_performance_marketer as safegold_marketing
 from .roles import (
     FE_ORANGE_CAPABILITIES, SAFEGOLD_ALLOWED_SCORES, SAFEGOLD_CAPABILITIES, SAFEGOLD_TOTAL, RoleProfile,
 )
 
 
 def rubric_input_issue(rubric_text: str, role: RoleProfile) -> str:
+    if role.key == safegold_marketing.ROLE_KEY:
+        return safegold_marketing.rubric_issue(rubric_text)
     if role.key == "safegold":
         return _safegold_rubric_issue(rubric_text)
     if role.key == "fe_orange":

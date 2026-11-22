@@ -374,7 +374,6 @@ def _default_rubric_path(role_key: str) -> str:
         "fe_orange": "fe_orange.md",
         "peeko2": "peeko2.md",
         "safegold": "safegold.md",
-        "safegold_performance_marketer": "safegold_performance_marketer.md",
     }
     if role_key in bundled_rubrics:
         bundled = Path(__file__).parent / "rubrics" / bundled_rubrics[role_key]

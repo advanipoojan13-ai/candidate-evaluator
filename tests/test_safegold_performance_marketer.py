@@ -22,6 +22,18 @@ ROLE = get_role_profile(marketing.ROLE_KEY)
 GOOGLE, META, APP, TESTING, OPTIMISATION, MEASUREMENT = ROLE.category_scores
 QUOTE = "I managed Google Ads and tested video against carousel creative."
 SOURCE = "work_experience[0].description"
+UPLOADED_RUBRIC = """# Test upload for SafeGold performance marketing
+
+| ID | Criterion | Allowed scores | Maximum |
+|---|---|---|---:|
+| C1 | Google Ads operations | 0, 1, 2, 4, 6 | 6 |
+| C2 | Meta Ads operations | 0, 1, 2, 4, 6 | 6 |
+| C3 | App acquisition | 0, 1, 2, 5, 8 | 8 |
+| C4 | Experimentation | 0, 1, 3, 6, 9 | 9 |
+| C5 | Optimisation and scaling | 0, 1, 2, 4, 6 | 6 |
+| C6 | Measurement and analysis | 0, 1, 3, 5 | 5 |
+| | **Total** | | **40** |
+"""
 
 
 def load_profile(**extra):
@@ -30,12 +42,12 @@ def load_profile(**extra):
         "public_identifier": "example",
         "work_experience": [{
             "company": "Example Studio", "role": "Performance Marketer",
-            "start": "2023", "is_current": True, "description": QUOTE,
+            "start": "2023", "description": QUOTE,
         }],
         **extra,
     }
     [candidate], rubric = _load_inputs(
-        BytesIO(json.dumps({"items": [profile]}).encode()), "", None, _default_rubric_path(ROLE.key), ROLE.key,
+        BytesIO(json.dumps({"items": [profile]}).encode()), "", BytesIO(UPLOADED_RUBRIC.encode()), "", ROLE.key,
     )
     return candidate, rubric
 
@@ -67,8 +79,10 @@ def grading(scores):
 
 def test_role_loads_rubric_and_nullable_schema():
     assert role_options()["Safegold - Performance Marketer"] == ROLE.key
+    assert _default_rubric_path(ROLE.key) == ""
+    assert _load_inputs(None, "", None, "", ROLE.key) == ([], "")
     _, rubric = load_profile()
-    assert rubric.startswith("# SafeGold — Performance Marketing Executive")
+    assert rubric == UPLOADED_RUBRIC
     assert not rubric_input_issue(rubric, ROLE)
     support = Path(_default_rubric_path("safegold")).read_text(encoding="utf-8")
     assert rubric_input_issue(support, ROLE)
@@ -118,6 +132,18 @@ def test_current_company_prefers_latest_start_and_retains_uncertain_ties():
         {**older, "is_current": False, "end_date": "2023-03"},
         {**first, "is_current": False, "end_date": "2024-07"},
     ], today) == ("First", "Lead")
+
+
+def test_unipile_open_ended_job_wins_over_older_ended_job():
+    candidate, _ = load_profile(work_experience=[
+        {"company": "Old Studio", "role": "Analyst", "start": "2020-03", "end": "2022-06"},
+        {"company": "Current Studio", "role": "Marketer", "start": "2023-02"},
+        {"company": "Undated Studio", "role": "Consultant"},
+        {"company": "Unconfirmed Studio", "role": "Lead", "start": "2024-05", "is_current": False},
+    ])
+    assert [role["is_current"] for role in candidate["experiences"]] == [False, True, False, False]
+    row = apply_calculated_fields(grading((None,) * 6), candidate, ROLE)
+    assert (row["Current Company"], row["Current Title"]) == ("Current Studio", "Marketer")
 
 
 @pytest.mark.parametrize("invalid", [3, -1, True, "4", 4.0])

@@ -118,7 +118,7 @@ def normalize_candidate(
         if isinstance(exp, dict) and (exp or not head_sales_unipile)
     ]
     if safegold_marketing:
-        experiences, marketing_sources = _marketing_evidence(profile, specifics)
+        experiences, marketing_sources = _marketing_evidence(profile, specifics, unipile=is_unipile)
     education_items = _first_list(profile.get("education"), specifics.get("education"))
     education = [_format_education(edu) for edu in education_items if isinstance(edu, dict)]
     public_identifier = _first_nonempty(profile.get("publicIdentifier"), profile.get("public_identifier"))
@@ -686,7 +686,7 @@ def _experience_items(
     return [], False
 
 
-def _marketing_evidence(profile: dict, specifics: dict) -> tuple[list[dict], dict[str, str]]:
+def _marketing_evidence(profile: dict, specifics: dict, *, unipile: bool) -> tuple[list[dict], dict[str, str]]:
     """Retain original profile paths for auditable marketing evidence."""
     nested = "specifics" if profile.get("specifics") is specifics else "specifics.linkedin"
     sources: dict[str, str] = {}
@@ -710,7 +710,7 @@ def _marketing_evidence(profile: dict, specifics: dict) -> tuple[list[dict], dic
                 continue
             path = f"{prefix}[{index}]"
             role = _normalize_experience(
-                item, len(experiences),
+                item, len(experiences), unipile=unipile,
                 current_position=prefix == "current_positions", safegold=True,
             )
             claim_paths = []

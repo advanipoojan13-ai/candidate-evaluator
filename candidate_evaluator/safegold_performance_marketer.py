@@ -27,6 +27,13 @@ OUTPUT_COLUMNS = [
     "Fintech Experience", "Startup Experience", "Relevant Paid-Marketing Duration and Recency",
     "Location and Mumbai Availability",
 ]
+EVIDENCED_POINTS = "Evidenced Points (/40)"
+SCORING_STATUS = "Scoring Status"
+MISSING_CRITERIA = "Missing Criteria"
+REPORT_COLUMNS = [
+    *OUTPUT_COLUMNS[:4], EVIDENCED_POINTS, SCORING_STATUS, *SCORES, MISSING_CRITERIA,
+    *OUTPUT_COLUMNS[11:],
+]
 
 
 def rubric_issue(text: str) -> str:
@@ -86,6 +93,48 @@ def calculate_total(row: dict) -> int | str:
     if unknown:
         return f"{points} evidenced points; incomplete — {', '.join(unknown)}"
     return points
+
+
+def report_summary(row: dict) -> dict:
+    """Summarize evidence from saved criterion scores, including older runs."""
+    missing = [name for name, column, _ in CRITERIA.values() if row.get(column) in (None, "")]
+    points = sum(row[column] for column in SCORES if row.get(column) not in (None, ""))
+    return {
+        EVIDENCED_POINTS: points,
+        SCORING_STATUS: "Incomplete" if missing else "Complete",
+        MISSING_CRITERIA: ", ".join(missing),
+    }
+
+
+def report_row(row: dict) -> dict:
+    report = {**row, **report_summary(row)}
+    for column in SCORES:
+        if report.get(column) in (None, ""):
+            report[column] = "Unknown"
+    return {column: report.get(column, "") for column in REPORT_COLUMNS}
+
+
+def write_excel(frame, destination) -> None:
+    from openpyxl.styles import Alignment
+    from openpyxl.utils import get_column_letter
+    from pandas import ExcelWriter
+
+    with ExcelWriter(destination, engine="openpyxl") as writer:
+        frame.to_excel(writer, sheet_name="Candidates", index=False)
+        sheet = writer.sheets["Candidates"]
+        sheet.freeze_panes = "B2"
+        sheet.auto_filter.ref = sheet.dimensions
+        sheet.row_dimensions[1].height = 32
+        for index, column in enumerate(frame.columns, start=1):
+            is_score = column in SCORES or column == EVIDENCED_POINTS
+            width = 16 if is_score else 24 if index < 7 else 44
+            sheet.column_dimensions[get_column_letter(index)].width = width
+            for (cell,) in sheet.iter_rows(min_col=index, max_col=index):
+                cell.alignment = Alignment(
+                    vertical="top", horizontal="center" if is_score else "left", wrap_text=True,
+                )
+                if cell.data_type == "f":
+                    cell.data_type = "s"
 
 
 def assessed_audit(row: dict, sources: dict) -> dict:

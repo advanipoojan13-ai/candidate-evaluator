@@ -537,17 +537,15 @@ FE_ORANGE_OUTPUT_COLUMNS = [
     "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
 ]
 
+LUCIO_INTERNATIONAL_SCORE = "International Exposure score (/8)"
 LUCIO_CATEGORY_SCORES = OrderedDict([
     ("Marketing Work score (/12)", 12),
-    ("International Exposure score (/8)", 8),
+    (LUCIO_INTERNATIONAL_SCORE, 8),
 ])
 LUCIO_COMPONENT_SCORING = OrderedDict([
     ("Marketing Work score (/12)", ComponentScoreRule(
         "C1 Evidence", "C1 Recency", "C1 Duration", 12 / 10,
         impact_maximum=3, duration_maximum=3,
-    )),
-    ("International Exposure score (/8)", ComponentScoreRule(
-        "C2 Evidence", "C2 Recency", None, 8 / 7, impact_maximum=3,
     )),
 ])
 LUCIO_TOTAL = "Final Score (/20)"
@@ -833,7 +831,7 @@ ROLE_PROFILES = {
             *(column for rule in LUCIO_COMPONENT_SCORING.values() for column in rule.columns),
         ],
         category_scores=LUCIO_CATEGORY_SCORES,
-        allowed_scores={},
+        allowed_scores={LUCIO_INTERNATIONAL_SCORE: {0, 2, 4, 6, 8}},
         total_column=LUCIO_TOTAL,
         total_max=sum(LUCIO_CATEGORY_SCORES.values()),
         outcome_column="Rank Number",
@@ -841,8 +839,8 @@ ROLE_PROFILES = {
         evidence_confidence_values=[],
         system_prompt="Evaluate LinkedIn profiles for Lucio's Founder’s Office role.",
         instructions=[
-            "Return Evidence, Recency and Duration for C1 and Evidence and Recency for C2. "
-            "Return every component, using zero when unsupported. Python calculates weighted scores and the total.",
+            "Return Evidence, Recency and Duration for C1 and the fixed International Exposure score for C2. "
+            "Return every score field, using zero when unsupported. Python calculates the weighted C1 score and the total.",
             "Return Law Degree as Yes or No. Return up to three source-labelled evidence facts separated by ' | ', "
             "material gaps or an empty string, and a score rationale of at most 50 words.",
         ],
@@ -858,7 +856,7 @@ ROLE_PROFILES = {
         evidence_sources=["Headline", "About", "All experiences", "Projects", "Skills", "Education"],
         skip_if_no_evidence=False,
         component_scoring=LUCIO_COMPONENT_SCORING,
-        decimal_component_columns=("C1 Evidence", "C2 Evidence"),
+        decimal_component_columns=("C1 Evidence",),
         experience_fields=[
             "index", "company_name", "position_or_title", "description",
             "employment_type", "start_date", "end_date", "is_current", "duration",

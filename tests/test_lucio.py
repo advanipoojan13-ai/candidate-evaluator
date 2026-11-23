@@ -53,10 +53,11 @@ def test_lucio_uses_uploaded_rubric_and_sends_relevant_evidence():
 
 
 def test_lucio_keeps_raw_components_out_of_display_and_exports():
+    international_score = "International Exposure score (/8)"
     schema = _response_schema(ROLE)["properties"]["grading"]
     grading = {
         "C1 Evidence": 1.5, "C1 Recency": 2, "C1 Duration": 1,
-        "C2 Evidence": 4, "C2 Recency": 2, "Law Degree": "Yes",
+        international_score: 6, "Law Degree": "Yes",
         "Strongest Evidence": "Experience: campaign outreach",
         "Missing or Unclear Information": "",
         "Score Rationale": "Marketing work and international exposure are supported.",
@@ -64,6 +65,7 @@ def test_lucio_keeps_raw_components_out_of_display_and_exports():
     assert set(schema["required"]) == set(grading)
     assert schema["properties"]["C1 Evidence"]["type"] == "number"
     assert schema["properties"]["C1 Recency"]["type"] == "integer"
+    assert schema["properties"][international_score]["enum"] == [0, 2, 4, 6, 8]
     assert schema["properties"]["Law Degree"]["enum"] == ["Yes", "No"]
 
     def scoring_row(values):
@@ -74,9 +76,12 @@ def test_lucio_keeps_raw_components_out_of_display_and_exports():
 
     row = scoring_row(grading)
     assert validate_output_row(row, ROLE) == []
-    assert row[ROLE.total_column] == pytest.approx(5.4 + 6 * 8 / 7)
-    assert scoring_row({**grading, **ROLE.component_score_maxima})[ROLE.total_column] == 20
-    for invalid in ({"C1 Recency": 1.5}, {"C2 Evidence": 4.5}, {"Law Degree": "Maybe"}):
+    for score in (0, 2, 4, 6, 8):
+        scored = scoring_row({**grading, international_score: score})
+        assert scored[international_score] == score
+        assert scored[ROLE.total_column] == pytest.approx(5.4 + score)
+    assert scoring_row({**grading, **ROLE.component_score_maxima, international_score: 8})[ROLE.total_column] == 20
+    for invalid in ({"C1 Recency": 1.5}, {international_score: 5}, {"Law Degree": "Maybe"}):
         evaluated = apply_calculated_fields(
             {"Candidate": "Example Candidate", "Profile URL": "", **grading, **invalid}, {}, ROLE,
         )
@@ -84,11 +89,11 @@ def test_lucio_keeps_raw_components_out_of_display_and_exports():
     displayed = prepare_output_rows([row], ROLE)
     assert list(displayed[0]) == ROLE.output_columns
     assert ROLE.output_columns[ROLE.output_columns.index(ROLE.total_column) + 1] == "Law Degree"
-    assert displayed[0][ROLE.total_column] == 12.3
+    assert displayed[0][ROLE.total_column] == 11.4
     assert not set(ROLE.component_score_maxima).intersection(displayed[0])
-    csv_rows = list(csv.DictReader(io.StringIO(_rows_to_csv_bytes(displayed, ROLE.report_columns).decode())))
-    assert csv_rows[0][ROLE.total_column] == "12.3"
-    workbook = _rows_to_xlsx_bytes(displayed, ROLE.report_columns)
+    csv_rows = list(csv.DictReader(io.StringIO(_rows_to_csv_bytes(displayed, ROLE.output_columns).decode())))
+    assert csv_rows[0][ROLE.total_column] == "11.4"
+    workbook = _rows_to_xlsx_bytes(displayed, ROLE.output_columns)
     frame = pd.read_excel(io.BytesIO(workbook))
     assert list(frame.columns) == ROLE.output_columns
-    assert frame.loc[0, ROLE.total_column] == 12.3
+    assert frame.loc[0, ROLE.total_column] == 11.4

@@ -69,6 +69,7 @@ class RoleProfile:
     skip_if_no_evidence: bool = True
     component_scoring: Optional[OrderedDict[str, ComponentScoreRule]] = None
     experience_fields: Optional[list[str]] = None
+    decimal_component_columns: tuple[str, ...] = ()
 
     @property
     def output_columns(self) -> list[str]:
@@ -536,6 +537,26 @@ FE_ORANGE_OUTPUT_COLUMNS = [
     "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
 ]
 
+LUCIO_CATEGORY_SCORES = OrderedDict([
+    ("Marketing Work score (/12)", 12),
+    ("International Exposure score (/8)", 8),
+])
+LUCIO_COMPONENT_SCORING = OrderedDict([
+    ("Marketing Work score (/12)", ComponentScoreRule(
+        "C1 Evidence", "C1 Recency", "C1 Duration", 12 / 10,
+        impact_maximum=3, duration_maximum=3,
+    )),
+    ("International Exposure score (/8)", ComponentScoreRule(
+        "C2 Evidence", "C2 Recency", None, 8 / 7, impact_maximum=3,
+    )),
+])
+LUCIO_TOTAL = "Final Score (/20)"
+LUCIO_OUTPUT_COLUMNS = [
+    "Candidate", "Profile URL", "Current Company", "Current Title",
+    *LUCIO_CATEGORY_SCORES, LUCIO_TOTAL, "Law Degree",
+    "Strongest Evidence", "Missing or Unclear Information", "Score Rationale",
+]
+
 SAFEGOLD_CAPABILITIES = OrderedDict([
     ("Customer-Facing Experience", 15),
     ("Customer Support Channels", 10),
@@ -801,6 +822,47 @@ ROLE_PROFILES = {
             "end_date",
             "is_current",
             "duration",
+        ],
+    ),
+    "lucio": RoleProfile(
+        key="lucio",
+        label="Lucio - Founder’s Office",
+        role_name="Founder’s Office (Marketing & GTM)",
+        grading_columns=[
+            *LUCIO_OUTPUT_COLUMNS[2:],
+            *(column for rule in LUCIO_COMPONENT_SCORING.values() for column in rule.columns),
+        ],
+        category_scores=LUCIO_CATEGORY_SCORES,
+        allowed_scores={},
+        total_column=LUCIO_TOTAL,
+        total_max=sum(LUCIO_CATEGORY_SCORES.values()),
+        outcome_column="Rank Number",
+        outcome_bands=[],
+        evidence_confidence_values=[],
+        system_prompt="Evaluate LinkedIn profiles for Lucio's Founder’s Office role.",
+        instructions=[
+            "Return Evidence, Recency and Duration for C1 and Evidence and Recency for C2. "
+            "Return every component, using zero when unsupported. Python calculates weighted scores and the total.",
+            "Return Law Degree as Yes or No. Return up to three source-labelled evidence facts separated by ' | ', "
+            "material gaps or an empty string, and a score rationale of at most 50 words.",
+        ],
+        internal_role_flag_name="relevant_lucio_role",
+        internal_role_evidence_name="lucio_evidence_extracted",
+        export_columns=LUCIO_OUTPUT_COLUMNS,
+        numeric_scores=True,
+        ranked=True,
+        ranking_tiebreaker_columns=list(LUCIO_CATEGORY_SCORES),
+        column_enums={"Law Degree": ["Yes", "No"]},
+        strongest_evidence_columns=["Strongest Evidence"],
+        rationale_max_words=50,
+        evidence_sources=["Headline", "About", "All experiences", "Projects", "Skills", "Education"],
+        skip_if_no_evidence=False,
+        component_scoring=LUCIO_COMPONENT_SCORING,
+        decimal_component_columns=("C1 Evidence", "C2 Evidence"),
+        experience_fields=[
+            "index", "company_name", "position_or_title", "description",
+            "employment_type", "start_date", "end_date", "is_current", "duration",
+            "experience_skills", "experience_tools", "employer_details",
         ],
     ),
     "fe_orange": RoleProfile(
@@ -1174,7 +1236,13 @@ def prepare_output_rows(
                 rank = index
             row[role.outcome_column] = rank
             previous_total = total
-    return [{column: row.get(column, "") for column in role.output_columns} for row in prepared]
+    output = [{column: row.get(column, "") for column in role.output_columns} for row in prepared]
+    if role.key == "lucio":
+        for row in output:
+            for column in (*role.category_scores, role.total_column):
+                if isinstance(row[column], (int, float)):
+                    row[column] = round(row[column], 1)
+    return output
 
 
 def validate_custom_role_config(config: dict[str, Any]) -> list[str]:

@@ -80,7 +80,9 @@ def validate_output_row(row: dict[str, Any], role_or_key: str | RoleProfile = "d
         category_scores.append(score)
 
     for column, maximum in role.component_score_maxima.items():
-        score = _as_number(row.get(column), column, errors, integer_only=True)
+        score = _as_number(
+            row.get(column), column, errors, integer_only=column not in role.decimal_component_columns,
+        )
         if score is not None and (score < 0 or score > maximum):
             errors.append(f"{column} must be between 0 and {maximum}; got {score}.")
 
@@ -170,7 +172,10 @@ def coerce_fixed_row(row: dict[str, Any], role_or_key: str | RoleProfile = "desi
     for column in numeric_columns:
         if fixed[column] != "":
             errors: list[str] = []
-            integer_only = column in role.component_score_maxima or not role.numeric_scores
+            integer_only = (
+                column not in role.decimal_component_columns
+                if column in role.component_score_maxima else not role.numeric_scores
+            )
             number = _as_number(fixed[column], column, errors, integer_only=integer_only)
             if errors:
                 raise ValueError(errors[0])
@@ -251,7 +256,7 @@ def apply_calculated_fields(
 
     experiences = candidate.get("experiences") or []
     current = next((experience for experience in experiences if experience.get("is_current")), None)
-    current = current or (experiences[0] if experiences and role.key != "safegold" else {})
+    current = current or (experiences[0] if experiences and role.key not in {"safegold", "lucio"} else {})
     if "Current Company" in role.grading_columns:
         calculated["Current Company"] = current.get("company_name", "")
     if "Current Title" in role.grading_columns:

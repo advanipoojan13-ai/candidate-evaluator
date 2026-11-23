@@ -358,9 +358,9 @@ def _response_content(response: Any, provider: ProviderProfile) -> str:
 
 def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str, Any]:
     experiences = candidate.get("experiences") or []
-    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "peeko", "peeko2", "sde3", "fe_orange", "safegold"}:
+    if role.key in {"backend", "ai_engineer_trj", "head_sales", "zeiss_visiogen", "peeko", "peeko2", "sde3", "fe_orange", "safegold", "lucio"}:
         experiences = merge_duplicate_experiences(
-            experiences, preserve_employment_details=role.key in {"peeko", "peeko2", "safegold"}
+            experiences, preserve_employment_details=role.key in {"peeko", "peeko2", "safegold", "lucio"}
         )
     candidate = {**candidate, "experiences": experiences}
     payload = {
@@ -384,6 +384,10 @@ def _candidate_payload(candidate: dict[str, Any], role: RoleProfile) -> dict[str
         "Candidate Name": candidate.get("candidate_name", ""),
         **custom_evidence_payload(candidate, role.evidence_sources),
     }
+    if role.key == "lucio":
+        for key, label in (("employer_data", "Employer Data"), ("volunteer_experiences", "Volunteer Experience")):
+            if candidate.get(key):
+                filtered_payload[label] = candidate[key]
     if role.experience_fields and filtered_payload.get("experiences"):
         filtered_payload["experiences"] = [
             {field: experience.get(field) for field in role.experience_fields if field in experience}
@@ -518,7 +522,7 @@ def _grading_properties(role: RoleProfile, columns: list[str]) -> dict[str, Any]
     for column in columns:
         if column in role.component_score_maxima:
             properties[column] = {
-                "type": "integer",
+                "type": "number" if column in role.decimal_component_columns else "integer",
                 "minimum": 0,
                 "maximum": role.component_score_maxima[column],
             }
